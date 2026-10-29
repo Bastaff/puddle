@@ -1,0 +1,11 @@
+name: An idea
+description: Something Puddle could show or do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you'd like
+      description: What you want to see or do, and why it matters to you.
+    validations:
+      required: true

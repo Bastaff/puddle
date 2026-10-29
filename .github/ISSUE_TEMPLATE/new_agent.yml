@@ -1,0 +1,22 @@
+name: Support another agent
+description: Ask for (or offer to build) support for a coding agent Puddle doesn't read yet
+labels: [agent-request]
+body:
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent
+      placeholder: Cursor, Gemini CLI, Aider, …
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where it records its work
+      description: Session logs, OpenTelemetry, a database? Paths and formats if you know them. docs/agents.md says what Puddle needs.
+  - type: checkboxes
+    id: build
+    attributes:
+      label: Building it
+      options:
+        - label: I'd like to build it myself.

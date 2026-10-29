@@ -1,0 +1,37 @@
+name: Something doesn't work
+description: Puddle does something wrong, shows a wrong number, or doesn't start
+labels: [bug]
+body:
+  - type: checkboxes
+    id: before
+    attributes:
+      label: Before you send it
+      options:
+        - label: I searched the open and closed issues.
+          required: true
+        - label: Nothing below contains a prompt, code, a file path, a token or a device key.
+          required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what Puddle did instead. A screenshot helps.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Puddle version
+      description: At the bottom of Settings → This Mac.
+    validations:
+      required: true
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Which agents
+      multiple: true
+      options: [Claude Code, Codex, Both, Not relevant]
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version

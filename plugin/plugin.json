@@ -1,0 +1,16 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "joule",
+  "version": "0.0.1",
+  "description": "See how you use your coding agents on a private dashboard. Only counts and lengths are shared, never prompts or answers.",
+  "author": { "name": "Puddle" },
+  "homepage": "https://puddle.rip",
+  "license": "MIT",
+  "keywords": ["analytics", "usage", "telemetry", "productivity"],
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "joule",
+      "interface": { "displayName": "Puddle", "privacyPolicyURL": "https://puddle.rip/privacy" }
+    }
+  }
+}

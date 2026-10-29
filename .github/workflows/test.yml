@@ -1,0 +1,41 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: npm
+      - name: Nothing private in the public repository
+        if: ${{ !github.event.repository.private }}
+        run: for p in service infra bench scripts/up.mjs .private-paths; do test ! -e "$p" || { echo "::error::$p must never be in the public repository"; exit 1; }; done
+      - run: npm ci
+      - run: npm test
+
+  app:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: companion-app
+      # the Node.js the app carries, checked against nodejs.org's checksums
+      - run: node scripts/fetch-node.mjs
+      - run: cargo check --locked
+        working-directory: companion-app

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Puddle",
+  "version": "../package.json",
+  "identifier": "app.joule.companion",
+  "build": {
+    "frontendDist": "../companion/public",
+    "beforeBuildCommand": "node scripts/stamp-version.mjs"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "category": "DeveloperTool",
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist"
+    },
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": {
+      "../companion": "app/companion",
+      "../collector": "app/collector",
+      "../plugin": "app/plugin",
+      "../package.json": "app/package.json"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "joule"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puddle · Me</title>
+<script>try { const q = new URLSearchParams(location.search).get("theme"), t = /^(auto|light|dark)$/.test(q || "") ? q : localStorage.getItem("cu-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+<link rel="stylesheet" href="/tokens.css"><script src="/squircle.js"></script><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/board.css"><link rel="stylesheet" href="/cards.css"><link rel="stylesheet" href="/you.css"><link rel="stylesheet" href="/me/me.css">
+</head>
+<body class="hosted personal me-page">
+<header class="bar">
+  <div class="brand"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2v20M2 12h20M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><b>Puddle</b></div>
+  <nav class="bar-nav" id="me-nav"><a href="/" class="on" aria-current="page">Me</a></nav>
+  <button class="pill action-btn" id="share-live" type="button">Share live</button>
+  <button class="icon-btn" id="theme-btn" type="button" aria-label="Theme" title="Theme"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="10" opacity=".28"/><path d="M12 2a10 10 0 0 1 0 20z"/></svg></button>
+</header>
+<main class="pv" id="pv" aria-busy="true"><!-- loading: the page's own shape, so nothing jumps when it fills in -->
+  <div class="pv-bar"><span class="sk sk-line" style="width:110px"></span></div>
+  <section class="kpis headline pv-tiles" data-card="tiles"><div class="kpi sk"></div><div class="kpi sk"></div><div class="kpi sk"></div><div class="kpi sk"></div><div class="kpi sk"></div><div class="kpi sk"></div></section>
+  <section class="card sk" data-card="work" style="height:228px"></section><section class="card sk" data-card="flags" style="height:200px"></section>
+  <section class="card sk" data-card="recent" style="height:300px"></section><section class="card sk" data-card="hands" style="height:70px"></section>
+</main>
+<div class="pv pv-extra">
+</div>
+<script src="/perf.js"></script><script src="/selfheal.js"></script><script src="/theme.js"></script>
+<script src="/learn.js"></script>
+<script src="/calendar.js"></script><script src="/projects.js"></script><script src="/agents.js"></script><script src="/signals.js"></script><script src="/lines.js"></script><script src="/motion.js"></script><script src="/layout.js"></script>
+<script type="module" src="/me/me.js"></script>
+</body>
+</html>

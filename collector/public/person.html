@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puddle</title>
+<script>try { const q = new URLSearchParams(location.search).get("theme"), t = /^(auto|light|dark)$/.test(q || "") ? q : localStorage.getItem("cu-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+<link rel="stylesheet" href="/tokens.css"><script src="/squircle.js"></script><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/board.css"><link rel="stylesheet" href="/cards.css"><link rel="stylesheet" href="/you.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 2v20M2 12h20M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><b>Puddle</b></div>
+  <nav class="bar-nav" id="site-nav"></nav>
+  <button class="icon-btn" id="theme-btn" type="button" aria-label="Theme" title="Theme"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="10" opacity=".28"/><path d="M12 2a10 10 0 0 1 0 20z"/></svg></button>
+</header>
+<main class="pv" id="pv" aria-busy="true"><!-- loading: the page's own shape, so nothing jumps when it fills in -->
+  <div class="pv-bar"><span class="sk sk-line" style="width:110px"></span></div>
+  <section class="kpis headline pv-tiles" data-card="tiles"><div class="kpi sk"></div><div class="kpi sk"></div><div class="kpi sk"></div><div class="kpi sk"></div><div class="kpi sk"></div><div class="kpi sk"></div></section>
+  <section class="card sk" data-card="work" style="height:228px"></section><section class="card sk" data-card="flags" style="height:200px"></section>
+  <section class="card sk" data-card="recent" style="height:300px"></section><section class="card sk" data-card="hands" style="height:70px"></section>
+</main>
+<script src="/perf.js"></script><script src="/selfheal.js"></script><script src="/theme.js"></script>
+<script src="/learn.js"></script>
+<script src="/nav.js"></script>
+<script src="/calendar.js"></script><script src="/projects.js"></script><script src="/agents.js"></script><script src="/signals.js"></script><script src="/lines.js"></script><script src="/motion.js"></script><script src="/layout.js"></script>
+<script type="module">
+// Me (no ?user) or a teammate (?team=…&user=…): the same page, the same numbers a team lead sees.
+import { mountPerson } from '/person.js';
+const q = new URLSearchParams(location.search), team = q.get('team'), user = q.get('user'), demo = q.get('demo');
+const extra = [team && `team=${encodeURIComponent(team)}`, user && `user=${encodeURIComponent(user)}`, demo && 'demo=1'].filter(Boolean).join('&');
+const scope = demo ? 'demo=1&' : team ? `team=${encodeURIComponent(team)}&` : '';
+document.title = user ? 'Puddle' : 'Me · Puddle';
+mountPerson(document.getElementById('pv'), {
+  api: ({ from, to, tz }) => `/api/person?from=${from}&to=${to}&tz=${tz}${extra ? '&' + extra : ''}`,
+  cards: (name, { from, to, tz }) => `/api/cards/${name}?from=${from}&to=${to}&tz=${tz}${extra ? '&' + extra : ''}`,
+  stream: `/api/stream${team ? `?team=${encodeURIComponent(team)}` : demo ? '?demo=1' : ''}`,
+  you: !user,
+  back: user ? { href: team ? `/?team=${encodeURIComponent(team)}` : demo ? '/?demo=1' : '/', label: 'Back to the team' } : null,
+  // a conversation opens on its project's page; "See all" lists this person's conversations (work.html)
+  links: {
+    project: (c, range) => `/project?${scope}p=${encodeURIComponent(c.project)}&range=${range}&c=${encodeURIComponent(c.session_id)}`,
+    work: (range) => `/work?${scope}range=${range}${user ? `&person=${encodeURIComponent(user)}` : ''}`,
+  },
+});
+</script>
+</body>
+</html>

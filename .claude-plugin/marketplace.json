@@ -1,0 +1,8 @@
+{
+  "name": "joule",
+  "owner": { "name": "Puddle" },
+  "metadata": { "description": "Puddle — a private usage dashboard for Claude Code and Codex." },
+  "plugins": [
+    { "name": "joule", "source": "./plugin", "description": "Private usage dashboard for Claude Code and Codex — counts and lengths only, never prompts." }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "productName": "Puddle Dev",
+  "identifier": "app.joule.dev",
+  "plugins": { "deep-link": { "desktop": { "schemes": ["joule-dev"] } } }
+}

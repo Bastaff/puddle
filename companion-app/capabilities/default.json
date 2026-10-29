@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability",
+  "identifier": "local-ui",
+  "description": "The Puddle screens are served from this machine only; they may call the app's own commands.",
+  "windows": ["main", "popover", "me", "team"],
+  "remote": { "urls": ["http://127.0.0.1:*/*", "http://localhost:*/*"] },
+  "permissions": ["core:default"]
+}

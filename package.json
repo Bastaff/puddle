@@ -1,0 +1,21 @@
+{
+  "name": "puddle",
+  "version": "0.0.1",
+  "description": "Puddle: a Mac menu bar app and a team website showing how people use their coding agents (Claude Code, Codex). Counts and timings only, never prompts or code",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "companion": "node --disable-warning=ExperimentalWarning companion/server.js",
+    "verify": "node --disable-warning=ExperimentalWarning scripts/verify.mjs",
+    "dev:app": "node scripts/dev-app.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "pg": "8.23.1"
+  }
+}

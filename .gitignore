@@ -1,0 +1,35 @@
+# dependencies and builds
+node_modules/
+companion-app/target/
+companion-app/gen/
+dist/
+
+# local data: usage databases and demo data never belong in the repo
+.dev-data/
+*.db
+*.db-shm
+*.db-wal
+
+# secrets and per-machine config (real values live in GCP Secret Manager or ~/.joule)
+.env
+.env.*
+!.env.example
+infra/**/*.local.*
+*.pem
+*.p12
+*.key
+
+# OS / editor
+.DS_Store
+!infra/**/*.local.env.example
+companion-app/binaries/
+
+# written at build time by scripts/stamp-version.mjs
+companion/VERSION
+companion/BUILD
+companion/BUILT
+companion-app/target-dev/
+.wip/
+companion/SERVICE
+# the logo files as they were handed over (the same files, renamed, are assets/logo/*.svg)
+assets/logo/Logo - *

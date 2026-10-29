@@ -1,0 +1,37 @@
+/* Personal view: the dashboard plus a highlights strip. */
+.me-tag { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; background: var(--ink); color: var(--page); border-radius: 6px; padding: 1px 6px; margin-left: 2px; }
+.personal [data-act="demo"], .personal [data-act="test"], .personal [data-act="reset"], .personal .demo-badge { display: none !important; }
+.brag { grid-column: 1 / -1; }
+.brag .kpi { background: var(--raised); }
+.brag > header { display: flex; align-items: center; gap: 10px; }
+.brag > header .share { margin-left: auto; }
+.brag > header h2 { margin-right: 0; }
+@media (max-width: 900px) { .brag .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .brag .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.brag-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.bt { background: var(--surface); border-radius: calc(16px * var(--sq)); padding: 10px 12px; display: flex; flex-direction: column; min-width: 0; box-shadow: var(--shadow-sm, none); }
+.bt .bl { font-size: 10.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.bt b { font-size: 22px; font-weight: 900; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-sheet img { width: 100%; border-radius: calc(14px * var(--sq)); display: block; box-shadow: var(--shadow); }
+.share-sheet .row { display: flex; gap: 8px; margin-top: 10px; }
+.share-sheet p { margin: 10px 0 0; font-size: 12.5px; }
+@media (max-width: 900px) { .brag-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .brag-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* one person: a map of one dot says nothing; let "Needs a look" use the row */
+.personal .where { display: none !important; }
+.personal .issues { grid-column: 1 / -1 !important; }
+
+/* Me's own page (index.html): one column of "you" cards, then highlights */
+.me-page { background: var(--page); color: var(--ink); font-family: var(--font); margin: 0; }
+.me-wrap { max-width: 1040px; margin: 0 auto; padding: 18px 16px 48px; display: flex; flex-direction: column; gap: var(--gap); }
+.me-top { display: flex; align-items: center; gap: 8px; font-size: 17px; }
+.me-src { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+.me-foot { text-align: center; font-size: 13px; margin: 6px 0 0; }
+.me-foot a { color: var(--ink-2); font-weight: 700; }
+@media (max-width: 760px) { .me-src { display: none; } }
+.me-top .btn { margin-left: 10px; }
+.share-url { font: 600 13px ui-monospace, Menlo, monospace; background: var(--wash); padding: 10px 12px; border-radius: calc(12px * var(--sq)); overflow-wrap: anywhere; }
+.pv-extra { display: block; padding-top: 0; }
+.pv-extra > * + * { margin-top: var(--gap); }
+.bar .bar-nav a.signin-cta { background: var(--s1); color: #fff; }

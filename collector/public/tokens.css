@@ -1,0 +1,58 @@
+/* Puddle's palette and shared sizes: the one copy, loaded first by every page (the website, Me, the Mac app's own
+   screens). Warm paper, soft cards, ink for "selected", the series colours for people and kinds of work.
+   Dark is written twice on purpose: once for "follow the Mac", once for "dark chosen by hand". CSS can't say
+   "system dark unless light was chosen, or dark chosen" in one rule without light-dark(), which the oldest Macs
+   Puddle supports (macOS 12) may not have. Change a colour in both dark blocks. */
+:root {
+  color-scheme: light;
+  --page: #f7f2e9; --surface: #fffdf8; --raised: #ffffff; --cal0: #e8dfcc;
+  --ink: #1f1b16; --ink-2: #4f4a42; --muted: #8a8378;
+  --grid: #ece6da; --axis: #cfc7b8; --border: #1f1b16; --wash: rgba(31, 27, 22, 0.055);
+  --land: #ddd3bf; --land-on: #b7d3f6; --ocean: #efeae1;
+  --tint-hero: #efe8fb; --tint-today: #fff3d1; --tint-team: #e6f4ec;
+  --gold: #f5b301; --gold-2: #d99a00;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --good: #0ca30c; --warn: #fab219; --critical: #d03b3b; --good-text: #006300;
+  --seq1: #cde2fb; --seq2: #9ec5f4; --seq3: #6da7ec; --seq4: #3987e5; --seq5: #256abf; --seq6: #104281;
+  --sq: 1; --r: calc(20px * var(--sq)); --gap: 12px; /* --sq: how much bigger rounded corners are where they're squircles */
+  /* kinds of work (tool categories) */
+  --k-read: var(--s1); --k-edit: var(--s3); --k-run: var(--s2); --k-web: var(--s7); --k-agent: var(--s5); --k-mcp: var(--s4); --k-other: var(--axis); --k-think: #6b6358;
+  --shadow: 0 1px 2px rgba(31, 27, 22, .04), 0 4px 16px rgba(31, 27, 22, .06); --shadow-sm: 0 1px 2px rgba(31, 27, 22, .06), 0 2px 6px rgba(31, 27, 22, .05);
+  --font: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, -apple-system, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #17151a; --surface: #211e25; --raised: #2a2630; --cal0: #322d37;
+    --ink: #fbf7ef; --ink-2: #d3ccbf; --muted: #9a9286;
+    --grid: #302c36; --axis: #48424f; --border: #4a4452; --wash: rgba(255, 255, 255, 0.06);
+    --land: #34303b; --land-on: #2d5389; --ocean: #1c1a21;
+    --tint-hero: #2a2338; --tint-today: #33291a; --tint-team: #1d2c25;
+    --gold: #f2b01e; --gold-2: #c68a00;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --good-text: #0ca30c; --k-think: #8d8597;
+    --seq1: #0d366b; --seq2: #104281; --seq3: #1c5cab; --seq4: #2a78d6; --seq5: #5598e7; --seq6: #9ec5f4;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .28); --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #17151a; --surface: #211e25; --raised: #2a2630; --cal0: #322d37;
+  --ink: #fbf7ef; --ink-2: #d3ccbf; --muted: #9a9286;
+  --grid: #302c36; --axis: #48424f; --border: #4a4452; --wash: rgba(255, 255, 255, 0.06);
+  --land: #34303b; --land-on: #2d5389; --ocean: #1c1a21;
+  --tint-hero: #2a2338; --tint-today: #33291a; --tint-team: #1d2c25;
+  --gold: #f2b01e; --gold-2: #c68a00;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --good-text: #0ca30c; --k-think: #8d8597;
+  --seq1: #0d366b; --seq2: #104281; --seq3: #1c5cab; --seq4: #2a78d6; --seq5: #5598e7; --seq6: #9ec5f4;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .28); --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35);
+}
+
+/* Corners: squircles (continuous curves, as on iOS) wherever a corner is rounded. A circle says so itself
+   (`border-radius: 50%; corner-shape: round;`), so dots and avatars stay round. A radius from 10px up is written
+   `calc(12px * var(--sq))`. */
+:where(*, *::before, *::after) { corner-shape: squircle; }
+/* a squircle of the same radius reads tighter than a round corner: where they're drawn, corners from 10px up grow so
+   the curve shows. Elsewhere (Safari, Puddle's window) squircle.js draws the big surfaces' corners itself. */
+@supports (corner-shape: squircle) { :root { --sq: 1.5; } }

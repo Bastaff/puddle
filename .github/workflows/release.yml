@@ -1,0 +1,51 @@
+name: release
+
+# A tag like v0.0.2 builds Puddle.app from exactly that commit and attaches it to the release, with its checksum.
+# The website it signs in to comes from the repository variable PUDDLE_SERVICE_URLS (without it, the build works on
+# the Mac only).
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: node scripts/fetch-node.mjs
+      - name: The tag matches package.json
+        run: test "v$(node scripts/version.mjs)" = "$GITHUB_REF_NAME"
+      - name: Build Puddle.app
+        working-directory: companion-app
+        env:
+          PUDDLE_SERVICE_URLS: ${{ vars.PUDDLE_SERVICE_URLS }}
+        run: npx --yes @tauri-apps/cli@2.12.1 build --bundles app
+      - name: Zip it, with its checksum
+        run: |
+          APP=companion-app/target/release/bundle/macos/Puddle.app
+          codesign --verify --deep --strict "$APP"
+          V="$(cat "$APP/Contents/Resources/app/companion/VERSION")"
+          ZIP="Puddle-$V-mac-arm64.zip"
+          ditto -c -k --norsrc --noextattr --keepParent "$APP" "$ZIP"
+          shasum -a 256 "$ZIP" > "$ZIP.sha256"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Puddle ${GITHUB_REF_NAME#v}" --notes-file CHANGELOG.md
+          gh release upload "$GITHUB_REF_NAME" "$ZIP" "$ZIP.sha256" --clobber
