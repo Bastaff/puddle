@@ -6,7 +6,7 @@ Puddle reads each coding agent through one adapter. A new agent is four things:
 2. **Its catalogue entry** in `collector/public/agents.js`: names, icon, clients, and what each client can report.
 3. **Its fixture** in `test/agents.test.js`.
 4. **Keeping it connected:** `companion/connections.js` checks each agent at start and every 10 minutes and connects
-   one that's missing or holds an old key (`plugin/bin/joule connect`, with `JOULE_ONLY=<id>`). A new agent needs its
+   one that's missing or holds an old key (`plugin/bin/puddle connect`, with `PUDDLE_ONLY=<id>`). A new agent needs its
    case there (where its settings live, how to tell Puddle's block from someone else's) and in `cmd_connect`.
 
 The board, sharing, "Needs a look", the Mac's setup report and the error table then work without other changes.

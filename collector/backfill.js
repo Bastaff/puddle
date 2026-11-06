@@ -1,22 +1,16 @@
-// Recovery: fills in anything telemetry missed (collector down, crash, sleep)
-// from Claude Code's local session logs (~/.claude/projects/**/*.jsonl).
-//
-// Every recovered row uses the same dedupe key as its telemetry twin
-// (request id, tool_use id, prompt id), so nothing is ever counted twice and
-// a late telemetry row always replaces a recovered one. While scanning, it
-// also cross-checks rows that telemetry did deliver against the session logs.
-
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { estimateCost } from './pricing.js';
 import zlib from 'node:zlib';
+import { makeFollower } from './lines.js';
 import { parseRollout } from './codex-backfill.js';
 import { canonicalClient } from './agents.js';
 
 const PROJECTS = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
 const CODEX = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
-const SETTLE_MS = 60_000; // leave very recent entries to telemetry first
+export const LOG_FOLDERS = [PROJECTS, CODEX];
+const SETTLE_MS = 60_000;
 
 function account() {
   try {
@@ -35,7 +29,6 @@ function walk(dir, out = []) {
   }
   return out;
 }
-// a log file's text; Codex compresses older conversations (rollout-….jsonl.zst, seen 21 Oct 2026)
 const readLog = (file) => (file.endsWith('.zst') ? zlib.zstdDecompressSync(fs.readFileSync(file)) : fs.readFileSync(file)).toString('utf8');
 
 const textOf = (content) => {
@@ -46,61 +39,55 @@ const textOf = (content) => {
   return parts.length ? parts.join('') : null;
 };
 
-function toolParams(name, input = {}) {
-  if (name === 'Bash' && input.command) {
-    return JSON.stringify({ bash_command: String(input.command).trim().split(/\s+/)[0], full_command: String(input.command).slice(0, 2000), description: input.description });
-  }
-  const keep = {};
-  for (const k of ['file_path', 'path', 'pattern', 'url', 'query', 'notebook_path', 'skill', 'subagent_type']) if (input[k] != null) keep[k] = String(input[k]).slice(0, 500);
-  return Object.keys(keep).length ? JSON.stringify(keep) : null;
-}
-
-// Parse one session log into telemetry-shaped rows.
-export function parseTranscript(text) {
+export function makeTranscriptParser() {
   const reqs = new Map(), uses = new Map(), results = [], prompts = new Map(), meta = new Map(), lines = [];
   const lastTotals = new Map(); let lastTs = 0, costN = 0;
-  // Claude Code writes the prompt's id on your lines only (the prompt, its tool results), never on Claude's replies:
-  // a reply belongs to the newest prompt before it in its conversation (the transcript is in order)
-  const current = new Map(); // session → prompt id
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    let r; try { r = JSON.parse(line); } catch { continue; }
-    // lines changed: Claude Code keeps a running total per session (cost-state, no timestamp of its own); each
-    // record's change since the previous one counts at the time of the record before it
-    if (r.type === 'cost-state' && r.sessionId) {
-      const n = costN++, a = Number(r.totalLinesAdded) || 0, d = Number(r.totalLinesRemoved) || 0, prev = lastTotals.get(r.sessionId);
-      // a resumed session starts counting from zero again: then this record is all new
-      const da = prev && a >= prev.a ? a - prev.a : a, dd = prev && d >= prev.d ? d - prev.d : d;
-      lastTotals.set(r.sessionId, { a, d });
-      if ((da || dd) && (lastTs || r.startTime)) lines.push({ key: `cl:${r.sessionId}:${n}`, ts: lastTs || Number(r.startTime), session_id: r.sessionId, added: da, removed: dd });
-      continue;
-    }
-    const ts = Date.parse(r.timestamp);
-    if (!ts || !r.sessionId) continue;
-    lastTs = ts;
-    if (!meta.has(r.sessionId) || r.version) meta.set(r.sessionId, { entrypoint: r.entrypoint || null, version: r.version || null });
-    const m = r.message;
-    if (r.type === 'assistant' && m && r.requestId && m.usage && m.model && m.model !== '<synthetic>') {
-      const prev = reqs.get(r.requestId);
-      // The last entry for a request carries the final usage.
-      reqs.set(r.requestId, { ts: prev ? Math.min(prev.ts, ts) : ts, model: m.model, usage: m.usage, session_id: r.sessionId, prompt_id: r.promptId || prev?.prompt_id || current.get(r.sessionId) || null,
-        effort: r.effort || prev?.effort || null });
-      for (const b of Array.isArray(m.content) ? m.content : []) {
-        if (b?.type === 'tool_use') uses.set(b.id, { name: b.name, input: b.input, ts, session_id: r.sessionId });
+  const current = new Map();
+  function feed(text) {
+    const changed = { reqs: new Set(), results: [], prompts: new Set(), lines: [] };
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let r; try { r = JSON.parse(line); } catch { continue; }
+      if (r.type === 'cost-state' && r.sessionId) {
+        const n = costN++, a = Number(r.totalLinesAdded) || 0, d = Number(r.totalLinesRemoved) || 0, prev = lastTotals.get(r.sessionId);
+        const da = prev && a >= prev.a ? a - prev.a : a, dd = prev && d >= prev.d ? d - prev.d : d;
+        lastTotals.set(r.sessionId, { a, d });
+        if ((da || dd) && (lastTs || r.startTime)) { const l = { key: `cl:${r.sessionId}:${n}`, ts: lastTs || Number(r.startTime), session_id: r.sessionId, added: da, removed: dd }; lines.push(l); changed.lines.push(l); }
+        continue;
       }
-    } else if (r.type === 'user' && m) {
-      if (r.promptId && !r.isMeta && !r.isCompactSummary) current.set(r.sessionId, r.promptId);
-      if (Array.isArray(m.content) && m.content.some((b) => b?.type === 'tool_result')) {
-        for (const b of m.content) {
-          if (b?.type === 'tool_result') results.push({ id: b.tool_use_id, is_error: !!b.is_error, ts, session_id: r.sessionId, decision: r.permissionDecision || null, prompt_id: r.promptId || null });
+      const ts = Date.parse(r.timestamp);
+      if (!ts || !r.sessionId) continue;
+      lastTs = ts;
+      if (!meta.has(r.sessionId) || r.version) meta.set(r.sessionId, { entrypoint: r.entrypoint || null, version: r.version || null });
+      const m = r.message;
+      if (r.type === 'assistant' && m && r.requestId && m.usage && m.model && m.model !== '<synthetic>') {
+        const prev = reqs.get(r.requestId);
+        reqs.set(r.requestId, { ts: prev ? Math.min(prev.ts, ts) : ts, model: m.model, usage: m.usage, session_id: r.sessionId, prompt_id: r.promptId || prev?.prompt_id || current.get(r.sessionId) || null,
+          effort: r.effort || prev?.effort || null });
+        changed.reqs.add(r.requestId);
+        for (const b of Array.isArray(m.content) ? m.content : []) if (b?.type === 'tool_use') uses.set(b.id, { name: b.name, ts, session_id: r.sessionId });
+      } else if (r.type === 'user' && m) {
+        if (r.promptId && !r.isMeta && !r.isCompactSummary) current.set(r.sessionId, r.promptId);
+        if (Array.isArray(m.content) && m.content.some((b) => b?.type === 'tool_result')) {
+          for (const b of m.content) {
+            if (b?.type !== 'tool_result') continue;
+            const x = { id: b.tool_use_id, is_error: !!b.is_error, ts, session_id: r.sessionId, decision: r.permissionDecision || null, prompt_id: r.promptId || null };
+            results.push(x); changed.results.push(x);
+          }
+        } else if (r.promptId && !r.isMeta && !r.isCompactSummary && !prompts.has(r.promptId)) {
+          const t = textOf(m.content);
+          if (t != null) { prompts.set(r.promptId, { ts, length: t.length, session_id: r.sessionId }); changed.prompts.add(r.promptId); }
         }
-      } else if (r.promptId && !r.isMeta && !r.isCompactSummary && !prompts.has(r.promptId)) {
-        const t = textOf(m.content);
-        if (t != null) prompts.set(r.promptId, { ts, length: t.length, session_id: r.sessionId });
       }
     }
+    return changed;
   }
-  return { reqs, uses, results, prompts, meta, lines };
+  return { feed, reqs, uses, results, prompts, meta, lines };
+}
+
+export function parseTranscript(text) {
+  const p = makeTranscriptParser(); p.feed(text);
+  return p;
 }
 
 export function makeBackfill(db, { home, notify, log }) {
@@ -112,7 +99,6 @@ export function makeBackfill(db, { home, notify, log }) {
   const getMeta = (k) => db.prepare('SELECT value FROM meta WHERE key = ?').get(k)?.value ?? null;
   const setMeta = (k, v) => db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, String(v));
 
-  // Recovered rows only overwrite other recovered rows, never telemetry.
   const ins = db.prepare(`
     INSERT INTO events (dedupe, ts, name, user_key, session_id, prompt_id, tool_name, success, duration_ms, model,
       input_tokens, output_tokens, cache_read, cache_creation, cost_usd, prompt_length, decision, error, attrs_json, source)
@@ -123,7 +109,6 @@ export function makeBackfill(db, { home, notify, log }) {
       success = excluded.success, prompt_length = excluded.prompt_length, decision = excluded.decision, attrs_json = excluded.attrs_json,
       prompt_id = COALESCE(excluded.prompt_id, events.prompt_id)
     WHERE events.source = 'transcript'`);
-  // the same, for rows from Codex's history (agent = codex)
   const insCodex = db.prepare(`
     INSERT INTO events (dedupe, ts, name, user_key, session_id, prompt_id, tool_name, success, duration_ms, model,
       input_tokens, output_tokens, cache_read, cache_creation, cost_usd, prompt_length, decision, error, attrs_json, source, agent)
@@ -142,17 +127,20 @@ export function makeBackfill(db, { home, notify, log }) {
   const fileRow = db.prepare('SELECT size, mtime_ms FROM backfill_files WHERE path = ?');
   const setFile = db.prepare('INSERT INTO backfill_files (path, size, mtime_ms) VALUES (?, ?, ?) ON CONFLICT(path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms');
 
-  const status = { running: false, lastRun: null, lastDurationMs: null, filesScanned: 0, lastRecovered: {}, check: null, error: null };
+  const nothing = () => ({ reqs: new Set(), results: new Set(), prompts: new Set(), lines: new Set() });
+  const followed = makeFollower(() => ({ parser: makeTranscriptParser(), later: nothing() }));
+  const IDLE_MS = 2 * 3600_000;
+  const codexRead = new Map(), CODEX_EVERY_MS = 30_000;
 
-  // Don't recover from periods when tracking was off, or from before a reset.
+  const status = { running: false, lastRun: null, lastDurationMs: null, filesScanned: 0, bytesRead: 0, historyBytes: 0, settlesAt: null, lastRecovered: {}, check: null, error: null };
+
   function floor() {
     let since = 0;
     try { since = Date.parse(JSON.parse(fs.readFileSync(path.join(home, 'state.json'), 'utf8')).since) || 0; } catch {}
     return Math.max(since, Number(getMeta('reset_at')) || 0);
   }
 
-  // bumped when history yields new fields (effort, app, lines…): the next run reads every log once more
-  const VERSION = 3; // 3: replies carry their prompt's id
+  const VERSION = 3;
   function run({ full = false } = {}) {
     if (status.running) return status;
     if ((Number(getMeta('backfill_version')) || 1) < VERSION) { full = true; setMeta('backfill_version', VERSION); }
@@ -160,7 +148,7 @@ export function makeBackfill(db, { home, notify, log }) {
     const t0 = Date.now();
     const recovered = { api_request: 0, tool_result: 0, tool_decision: 0, user_prompt: 0, code_lines: 0 };
     const check = { requests: 0, tokenMismatch: 0, costMismatch: 0, costUnknown: 0, prompts: 0, promptMismatch: 0, examples: [] };
-    let files = 0;
+    let files = 0, bytesRead = 0, historyBytes = 0, settles = Infinity;
     try {
       const lo = floor();
       const hi = Date.now() - SETTLE_MS;
@@ -169,24 +157,29 @@ export function makeBackfill(db, { home, notify, log }) {
       for (const file of walk(PROJECTS)) {
         let st; try { st = fs.statSync(file); } catch { continue; }
         if (st.mtimeMs < lo) continue;
+        historyBytes += st.size;
         const seen = fileRow.get(file);
-        if (!full && seen && seen.size === st.size && seen.mtime_ms === st.mtimeMs) continue;
+        if (!full && seen && seen.size === st.size && seen.mtime_ms === st.mtimeMs) { if (st.mtimeMs < Date.now() - IDLE_MS) followed.logs.delete(file); continue; }
         files++;
-        const p = parseTranscript(fs.readFileSync(file, 'utf8'));
+        const { s, text, bytes } = followed.follow(file, st, { again: full });
+        const todo = s.later;
+        if (text) { const got = s.parser.feed(text); for (const k of Object.keys(todo)) for (const x of got[k]) todo[k].add(x); }
+        bytesRead += bytes;
+        const p = s.parser, later = nothing();
         const inWindow = (ts) => ts >= lo && ts <= hi;
-        let complete = true;
 
         db.exec('BEGIN');
         try {
           const touched = new Set();
-          const ep = (sid) => p.meta.get(sid)?.entrypoint || null; // which app: the Claude app, the terminal, an editor…
+          const ep = (sid) => p.meta.get(sid)?.entrypoint || null;
           const touch = (sid, ts) => {
             const m = p.meta.get(sid) || {};
             upSession.run(sid, userKey, m.entrypoint, m.version, ts, ts);
             if (!touched.has(sid)) { upUser.run(userKey, me.email, me.account_uuid, me.organization_id, ts, ts); touched.add(sid); }
           };
-          for (const [rid, q] of p.reqs) {
-            if (q.ts > hi) complete = false;
+          for (const rid of todo.reqs) {
+            const q = p.reqs.get(rid);
+            if (q.ts > hi) { later.reqs.add(rid); settles = Math.min(settles, q.ts + SETTLE_MS); }
             if (!inWindow(q.ts)) continue;
             const u = q.usage;
             const tok = [u.input_tokens || 0, u.output_tokens || 0, u.cache_read_input_tokens || 0, u.cache_creation_input_tokens || 0];
@@ -212,11 +205,11 @@ export function makeBackfill(db, { home, notify, log }) {
               tok[0], tok[1], tok[2], tok[3], cost, null, null, JSON.stringify(attrs));
             if (!ex && Number(r.changes)) recovered.api_request++;
           }
-          for (const res of p.results) {
-            if (res.ts > hi) complete = false;
+          for (const res of todo.results) {
+            if (res.ts > hi) { later.results.add(res); settles = Math.min(settles, res.ts + SETTLE_MS); }
             if (!inWindow(res.ts)) continue;
             const use = p.uses.get(res.id) || {};
-            const params = null; // team privacy: never store what a tool ran or opened
+            const params = null;
             for (const [name, key, decision] of [['tool_result', 'tr:', null], ['tool_decision', 'td:', res.decision?.decision || null]]) {
               if (name === 'tool_decision' && !decision) continue;
               const ex = existing.get(key + res.id);
@@ -228,8 +221,9 @@ export function makeBackfill(db, { home, notify, log }) {
               if (!ex && Number(r.changes)) recovered[name]++;
             }
           }
-          for (const [pid, pr] of p.prompts) {
-            if (pr.ts > hi) complete = false;
+          for (const pid of todo.prompts) {
+            const pr = p.prompts.get(pid);
+            if (pr.ts > hi) { later.prompts.add(pid); settles = Math.min(settles, pr.ts + SETTLE_MS); }
             if (!inWindow(pr.ts)) continue;
             const ex = existing.get('up:' + pid);
             if (ex && ex.source !== 'transcript') {
@@ -245,9 +239,8 @@ export function makeBackfill(db, { home, notify, log }) {
             const r = ins.run('up:' + pid, pr.ts, 'user_prompt', userKey, pr.session_id, pid, null, null, null, null, null, null, null, null, pr.length, null, JSON.stringify(attrs));
             if (!ex && Number(r.changes)) recovered.user_prompt++;
           }
-          // lines added/removed (numbers only)
-          for (const l of p.lines) {
-            if (l.ts > hi) complete = false;
+          for (const l of todo.lines) {
+            if (l.ts > hi) { later.lines.add(l); settles = Math.min(settles, l.ts + SETTLE_MS); }
             if (!inWindow(l.ts)) continue;
             const ex = existing.get(l.key);
             if (ex && ex.source !== 'transcript') continue;
@@ -256,25 +249,28 @@ export function makeBackfill(db, { home, notify, log }) {
             const r = ins.run(l.key, l.ts, 'code_lines', userKey, l.session_id, null, null, null, null, null, null, null, null, null, null, null, JSON.stringify(attrs));
             if (!ex && Number(r.changes)) recovered.code_lines++;
           }
-          // Only mark the file done once nothing in it is still too fresh to judge.
-          if (complete) setFile.run(file, st.size, st.mtimeMs);
+          s.later = later;
+          if (!Object.values(later).some((x) => x.size)) setFile.run(file, st.size, st.mtimeMs);
           db.exec('COMMIT');
-        } catch (e) { db.exec('ROLLBACK'); throw e; }
+        } catch (e) { db.exec('ROLLBACK'); followed.logs.delete(file); throw e; }
       }
-      // Codex: its rollouts give the same kinds of events (numbers only; see codex-backfill.js)
       for (const file of walk(CODEX).filter((f) => path.basename(f).startsWith('rollout-'))) {
         let st; try { st = fs.statSync(file); } catch { continue; }
         if (st.mtimeMs < lo) continue;
+        historyBytes += st.size;
         const seen = fileRow.get(file);
-        if (!full && seen && seen.size === st.size && seen.mtime_ms === st.mtimeMs) continue;
-        files++;
-        let x; try { x = parseRollout(readLog(file)); } catch { setFile.run(file, st.size, st.mtimeMs); continue; } // unreadable: skipped, not retried
+        if (!full && seen && seen.size === st.size && seen.mtime_ms === st.mtimeMs) { codexRead.delete(file); continue; }
+        const at = codexRead.get(file) || 0;
+        if (!full && Date.now() - at < CODEX_EVERY_MS) { settles = Math.min(settles, at + CODEX_EVERY_MS); continue; }
+        codexRead.set(file, Date.now());
+        files++; bytesRead += st.size;
+        let x; try { x = parseRollout(readLog(file)); } catch { setFile.run(file, st.size, st.mtimeMs); continue; }
         if (!x.session?.id) { setFile.run(file, st.size, st.mtimeMs); continue; }
         const sid = x.session.id, entry = canonicalClient(x.session.entrypoint) || null;
         const attrs = (o) => JSON.stringify({ ...o, recovered_from: 'codex log', 'session.id': sid, 'app.entrypoint': entry });
         let complete = true;
         const put = (key, ts, name, row, a) => {
-          if (ts > hi) { complete = false; return; }
+          if (ts > hi) { complete = false; settles = Math.min(settles, ts + SETTLE_MS); return; }
           if (ts < lo) return;
           const ex = existing.get(key);
           if (ex && ex.source !== 'transcript') return;
@@ -287,7 +283,6 @@ export function makeBackfill(db, { home, notify, log }) {
         db.exec('BEGIN');
         try {
           for (const q of x.prompts) put(q.key, q.ts, 'user_prompt', { length: q.length, prompt_id: q.id }, { prompt_length: q.length });
-          // each call with the prompt it answered (codex-backfill.js) and its list price (Codex logs no cost)
           for (const q of x.reqs) put(q.key, q.ts, 'api_request', { model: q.model, input: q.input, output: q.output, cacheRead: q.cached, cacheCreation: q.cacheWrite, prompt_id: q.prompt_id,
             cost: estimateCost(q.model, { input_tokens: Math.max(0, q.input - q.cacheWrite), cache_read_input_tokens: q.cached, cache_creation_input_tokens: q.cacheWrite, output_tokens: q.output }) },
             { effort: q.effort, thinking_tokens: q.thinking, context_window: q.window });
@@ -307,6 +302,9 @@ export function makeBackfill(db, { home, notify, log }) {
       status.lastRun = Date.now();
       status.lastDurationMs = Date.now() - t0;
       status.filesScanned = files;
+      status.bytesRead = bytesRead;
+      status.historyBytes = historyBytes;
+      status.settlesAt = Number.isFinite(settles) ? settles : null;
       status.lastRecovered = recovered;
       if (files) status.check = check;
       const n = Object.values(recovered).reduce((a, b) => a + b, 0);
@@ -321,7 +319,6 @@ export function makeBackfill(db, { home, notify, log }) {
     return status;
   }
 
-  // ---- downtime detection ---------------------------------------------------
   const HEARTBEAT_MS = 15_000;
   let beat = null;
   function startup() {
@@ -341,7 +338,6 @@ export function makeBackfill(db, { home, notify, log }) {
   return {
     run,
     startup,
-    // before the database closes: no heartbeat after that (it would write to a closed database)
     stop() { clearInterval(beat); beat = null; },
     markCleanShutdown() { clearInterval(beat); beat = null; setMeta('shutdown', 'clean'); setMeta('heartbeat', Date.now()); },
     markReset() {

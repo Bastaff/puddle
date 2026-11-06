@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-// minimal browser stand-ins; motion.js only needs these to start (hidden: a tab in the background)
 const load = ({ hidden = false } = {}) => {
   const ctx = {
     document: { documentElement: { dataset: {}, style: { setProperty() {} } }, hidden, addEventListener() {} },

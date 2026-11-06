@@ -1,4 +1,3 @@
-// Projects & conversations: the top conversations by name, the rest as one total (Me on this Mac and teams).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { topConversations } from '../collector/queries.js';
@@ -33,7 +32,7 @@ test('latest conversations: a repo by its own name (the full path on hover), the
   ];
   const html = ctx.recentHTML(rows, { time: (m) => `${m}m`, ago: () => '1h', nameOf: (u) => ({ u1: 'Ana', u2: 'Boris' })[u], href: (c) => `/project?p=${c.project}&c=${c.session_id}`, seeAll: '/work?range=7d' });
   const shown = [...html.matchAll(/class="rc" href="([^"]*)" title="([^"]*)">.*?<b>([^<]*)<\/b><small>([^<]*)<\/small>/g)].map((m) => m.slice(1))
-    .map(([a, b, t, c]) => [a, b, t.startsWith('Conversation on ') ? 'Conversation on <day>' : t, c]); // the day as the machine writes dates
+    .map(([a, b, t, c]) => [a, b, t.startsWith('Conversation on ') ? 'Conversation on <day>' : t, c]);
   assert.deepEqual(shown, [
     ['/project?p=gitlab.com/production3002117/green-point-web-app&amp;c=s1', 'gitlab.com/production3002117/green-point-web-app', 'Fix login', 'Ana · green-point-web-app'],
     ['/project?p=GreenPoint&amp;c=s2', 'GreenPoint', 'Conversation on <day>', 'Boris · GreenPoint'],

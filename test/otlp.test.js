@@ -70,14 +70,13 @@ test('store dedupes events and turns cumulative metrics into deltas', async () =
   const before = snapshot();
   store.insertEvents(parseLogs(logs));
   assert.equal(snapshot(), before, 'a resent batch changes nothing stored (and adds no duplicates)');
-  // a resent event with a detail the first copy lacked: the detail is filled in, nothing else changes
   const more = parseLogs(logs); more[0].attrs = { ...more[0].attrs, effort: 'high' };
   store.insertEvents(more);
   const row = store.db.prepare(`SELECT attrs_json FROM events WHERE dedupe = ?`).get(more[0].dedupe);
   assert.equal(JSON.parse(row.attrs_json).effort, 'high');
   store.insertPoints(parseMetrics(metric(10)));
   store.insertPoints(parseMetrics(metric(25)));
-  store.insertPoints(parseMetrics(metric(25))); // no change -> no row
+  store.insertPoints(parseMetrics(metric(25)));
   const q = makeQueries(store.db);
   const f = { from: 0, to: Date.now() + 60_000 };
   const sum = (await q.summary(f));
@@ -94,7 +93,7 @@ test('store dedupes events and turns cumulative metrics into deltas', async () =
 test('timeline buckets align to the local clock at any precision', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu-tl-'));
   const store = openDb(path.join(dir, 'u.db'));
-  const at = Date.UTC(2026, 0, 1, 10, 7, 30); // 10:07:30 UTC
+  const at = Date.UTC(2026, 0, 1, 10, 7, 30);
   const ev = (name, ts, extra = []) => ({ timeUnixNano: String(BigInt(ts) * 1000000n), attributes: [...ident, s('event.name', name), s('event.sequence', ts), ...extra] });
   store.insertEvents(parseLogs({ resourceLogs: [{ scopeLogs: [{ logRecords: [
     ev('api_request', at, [s('request_id', 'r1'), s('input_tokens', 10), s('cost_usd', 0.5)]),
@@ -103,7 +102,7 @@ test('timeline buckets align to the local clock at any precision', async () => {
   ] }] }] }));
   const q = makeQueries(store.db);
   const f = { from: at - 3600_000, to: at + 3600_000 };
-  const m15 = (await q.timeline(f, 15, 90)); // UTC+1:30
+  const m15 = (await q.timeline(f, 15, 90));
   assert.equal(m15.bucketMs, 15 * 60_000);
   assert.equal(m15.buckets.length, 2, '10:07 and 10:16 UTC fall in different 15-min buckets of a +1:30 clock (11:37 / 11:46)');
   assert.equal(new Date(m15.buckets[0].t + 90 * 60_000).getUTCMinutes() % 15, 0, 'bucket starts on a local quarter hour');
@@ -117,7 +116,7 @@ test('timeline buckets align to the local clock at any precision', async () => {
 test('timeline auto-fit frames the active part of a mostly empty window', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu-fit-'));
   const store = openDb(path.join(dir, 'u.db'));
-  const to = Date.UTC(2026, 0, 1, 20, 0), from = to - 20 * 3600_000; // 20h window, activity only in the last hour
+  const to = Date.UTC(2026, 0, 1, 20, 0), from = to - 20 * 3600_000;
   store.insertEvents(parseLogs({ resourceLogs: [{ scopeLogs: [{ logRecords: [{ timeUnixNano: String(BigInt(to - 3600_000) * 1000000n), attributes: [...ident, s('event.name', 'user_prompt'), s('prompt.id', 'p'), s('prompt_length', 3)] }] }] }] }));
   const q = makeQueries(store.db);
   const r = (await q.timeline({ from, to }, 0, 0, true));
@@ -131,7 +130,7 @@ test('timeline auto-fit frames the active part of a mostly empty window', async 
 test('days groups activity by the local calendar day', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu-days-'));
   const store = openDb(path.join(dir, 'u.db'));
-  const late = Date.UTC(2026, 0, 1, 23, 30); // 23:30 UTC = 00:30 next day in UTC+1
+  const late = Date.UTC(2026, 0, 1, 23, 30);
   const ev = (ts, id) => ({ timeUnixNano: String(BigInt(ts) * 1000000n), attributes: [...ident, s('event.name', 'user_prompt'), s('prompt.id', id), s('prompt_length', 4)] });
   store.insertEvents(parseLogs({ resourceLogs: [{ scopeLogs: [{ logRecords: [ev(late, 'a'), ev(late - 3 * 3600_000, 'b')] }] }] }));
   const q = makeQueries(store.db);

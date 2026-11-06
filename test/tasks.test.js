@@ -1,5 +1,3 @@
-// "Needs a look" on what tasks cost: when sub-agents made most of a task's cost, or conversations re-read far more
-// context than the team's usual (from the per-prompt summary, task_rollup).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { taskRules } from '../collector/flags.js';

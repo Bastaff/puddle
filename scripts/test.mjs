@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// npm test: the tests with a temp folder of their own, removed afterwards (a run leaves ~3 GB of databases and
-// downloads behind otherwise, and a full disk fails tests in confusing ways). Arguments pass through to node --test.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

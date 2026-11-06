@@ -1,9 +1,3 @@
-// Storage for usage data, on two databases with the same interface:
-//   openDb(file)          SQLite (node:sqlite, built into Node): the device (Me, local tracker)
-//   openPgStore(pg)       Postgres (pg.Pool, or PGlite locally/in tests): the team service
-// Both return { sql, insertEvents, insertPoints, upsertIdentity, addFeedback, close }.
-// SQLite methods run synchronously (callers may still await them); Postgres ones are async.
-
 import { sqliteRollup, rollupSchema, rollupVersion, rebuildRollup, refreshRollup, touchedKeys, rebuildWindow, setRollupVersion, refreshRuns, refreshRunTails, rebuildRunsFor, sessionsOf, QUARTER, ROLLUP_VERSION } from './rollup.js';
 import { DatabaseSync } from 'node:sqlite';
 import { cumulativeDelta } from './otlp.js';
@@ -80,7 +74,6 @@ CREATE TABLE IF NOT EXISTS series_state (
 );`;
 };
 
-// The statements both stores share. `S` supplies the few dialect differences.
 const statements = (S) => ({
   upUser: `INSERT INTO users (user_key, email, account_uuid, organization_id, user_id, name, country, timezone, first_seen, last_seen)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -103,9 +96,6 @@ const statements = (S) => ({
       app_version = COALESCE(excluded.app_version, sessions.app_version),
       first_seen = ${S.least('sessions.first_seen', 'excluded.first_seen')},
       last_seen = ${S.greatest('sessions.last_seen', 'excluded.last_seen')}`,
-  // Telemetry is the primary source: it replaces a row recovered from session logs. A resent batch changes
-  // nothing already stored, but fills in details the first copy didn't have (e.g. effort, from a newer Puddle).
-  // A copy that adds nothing isn't written at all (the WHERE): a 90-day resend costs reads, not rewrites.
   insEvent: `INSERT INTO events (dedupe, ts, name, user_key, session_id, prompt_id, tool_name, success,
       duration_ms, model, input_tokens, output_tokens, cache_read, cache_creation, cost_usd, prompt_length,
       decision, error, attrs_json, source, agent)
@@ -130,7 +120,7 @@ const statements = (S) => ({
       attrs_json = CASE WHEN events.source <> 'otel' THEN excluded.attrs_json ELSE ${S.jsonFill('excluded.attrs_json', 'events.attrs_json')} END,
       source = 'otel'
     WHERE events.source <> 'otel' OR NOT (${S.jsonSame(S.jsonFill('excluded.attrs_json', 'events.attrs_json'), 'events.attrs_json')})
-      OR (events.prompt_id IS NULL AND excluded.prompt_id IS NOT NULL)`, // a copy that knows its prompt fills it in
+      OR (events.prompt_id IS NULL AND excluded.prompt_id IS NOT NULL)`,
   insPoint: `INSERT INTO metric_points (ts, name, user_key, session_id, model, type, value, attrs_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   getState: `SELECT start_ns, value FROM series_state WHERE series_key = ?`,
   setState: `INSERT INTO series_state (series_key, start_ns, value) VALUES (?, ?, ?)
@@ -150,22 +140,17 @@ const pointArgs = (p, value) => [Math.round(p.ts), p.name, p.identity.key, p.ses
 const identityArgs = (id) => [id.account_uuid || id.email, id.email, id.account_uuid, id.organization_id, id.name, id.country, id.timezone];
 const feedbackOk = ({ user_key, kind, verdict }) => user_key && /^[a-z]{2,20}$/.test(kind || '') && ['yes', 'no', 'undo'].includes(verdict);
 
-// ---------------------------------------------------------------- SQLite (device)
-
-// Upgrades databases created by earlier versions (SQLite only: Postgres starts fresh).
 function migrate(db) {
   const cols = db.prepare(`PRAGMA table_info(events)`).all().map((c) => c.name);
   if (!cols.includes('source')) db.exec(`ALTER TABLE events ADD COLUMN source TEXT NOT NULL DEFAULT 'otel'`);
-  if (!cols.includes('agent')) db.exec(`ALTER TABLE events ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude-code'`); // claude-code | codex
+  if (!cols.includes('agent')) db.exec(`ALTER TABLE events ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude-code'`);
   const pcols = db.prepare(`PRAGMA table_info(plan_limits)`).all().map((c) => c.name);
   if (pcols.length) for (const [c, t] of [['month_pct', 'REAL'], ['month_reset', 'INTEGER']]) if (!pcols.includes(c)) db.exec(`ALTER TABLE plan_limits ADD COLUMN ${c} ${t}`);
   const ucols = db.prepare(`PRAGMA table_info(users)`).all().map((c) => c.name);
   for (const c of ['name', 'country', 'timezone']) if (!ucols.includes(c)) db.exec(`ALTER TABLE users ADD COLUMN ${c} TEXT`);
-  // Team privacy: remove tool inputs/commands/paths stored by earlier versions.
   db.exec(`UPDATE events SET attrs_json = json_remove(attrs_json, '$.tool_parameters', '$.tool_input', '$.tool_output', '$.full_command', '$.error'),
       error = json_extract(attrs_json, '$.error_type')
     WHERE name IN ('tool_result', 'tool_decision') AND (json_extract(attrs_json, '$.tool_parameters') IS NOT NULL OR json_extract(attrs_json, '$.tool_input') IS NOT NULL OR json_extract(attrs_json, '$.error') IS NOT NULL)`);
-  // Older rows used a hash key; switch them to the shared keys recovery uses.
   db.exec(`
     UPDATE OR IGNORE events SET dedupe = 'api:' || json_extract(attrs_json, '$.request_id')
       WHERE name = 'api_request' AND dedupe NOT LIKE 'api:%' AND json_extract(attrs_json, '$.request_id') IS NOT NULL;
@@ -178,15 +163,11 @@ function migrate(db) {
   `);
 }
 
-// rollup: keep the summary table (collector/rollup.js) as events arrive: the demo team and tests; a Mac's own copy
-// doesn't use it yet
 export function openDb(file, { rollup = false } = {}) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
-  // Existing databases predate the newer columns: create, then migrate, before indexes on them matter.
   db.exec(schema('sqlite').replace(/,\s*name TEXT, country TEXT, timezone TEXT/, '').replace(/,\s*source TEXT NOT NULL DEFAULT 'otel', agent TEXT NOT NULL DEFAULT 'claude-code'/, ''));
   migrate(db);
-  // Gathers index statistics where missing; without them per-prompt lookups pick a slow plan.
   db.exec('PRAGMA optimize=0x10002');
   const S = sqliteSql(db);
   const st = statements(S);
@@ -205,7 +186,6 @@ export function openDb(file, { rollup = false } = {}) {
 
   return {
     db, sql: S, dialect: 'sqlite', rollup: { ready: () => Boolean(R) },
-    // Fills in name/country/time zone for an account without touching activity times.
     upsertIdentity(id) {
       if (!id?.account_uuid && !id?.email) return;
       p.upIdentity.run(...identityArgs(id));
@@ -249,24 +229,18 @@ export function openDb(file, { rollup = false } = {}) {
   };
 }
 
-// ---------------------------------------------------------------- Postgres (team service)
-
-// Runs fn inside one transaction, with a dialect wrapper bound to that transaction.
 async function inTx(pg, fn) {
-  if (typeof pg.transaction === 'function') return pg.transaction((tx) => fn(pgSql(tx))); // PGlite
-  const client = await pg.connect(); // pg.Pool
+  if (typeof pg.transaction === 'function') return pg.transaction((tx) => fn(pgSql(tx)));
+  const client = await pg.connect();
   try { await client.query('BEGIN'); const r = await fn(pgSql(client)); await client.query('COMMIT'); return r; }
   catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
   finally { client.release(); }
 }
 
-// Multi-row VALUES (?, ?), (?, ?) … for `n` rows of `w` columns.
 const values = (n, w) => Array.from({ length: n }, () => `(${Array(w).fill('?').join(', ')})`).join(', ');
-const CHUNK = 400; // rows per statement (Postgres allows 65535 parameters; events have 20 columns)
+const CHUNK = 400;
 const chunks = (a, n = CHUNK) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, (i + 1) * n));
 
-// What a batch does to users and sessions, folded per key exactly as one-by-one upserts would:
-// the last non-empty value of each field wins, and first/last seen widen to cover every row.
 function fold(items) {
   const users = new Map(), sessions = new Map();
   const merge = (m, key, args, firstIdx, lastIdx) => {
@@ -275,7 +249,7 @@ function fold(items) {
     args.forEach((v, i) => {
       if (i === firstIdx) cur[i] = cur[i] == null ? v : v == null ? cur[i] : Math.min(cur[i], v);
       else if (i === lastIdx) cur[i] = cur[i] == null ? v : v == null ? cur[i] : Math.max(cur[i], v);
-      else if (v != null && !(m === sessions && i === 2 && cur[i] === 'codex_background')) cur[i] = v; // background stays background
+      else if (v != null && !(m === sessions && i === 2 && cur[i] === 'codex_background')) cur[i] = v;
     });
   };
   for (const { identity, session, ts } of items) {
@@ -285,17 +259,10 @@ function fold(items) {
   return { users: [...users.values()], sessions: [...sessions.values()] };
 }
 
-// Model calls get their prompt as they arrive: the newest prompt at or before them in their conversation (from this
-// batch or already stored). Codex never says which prompt a call answered (live or in its own files: 21 Oct 2026);
-// before this, an hourly job matched them all at once, and 3,237 at once froze the website for 9 minutes.
-// And one Codex prompt or call is stored once: its live copy (telemetry) and its history copy (Codex's own files)
-// carry no shared id, so the same conversation, the same length (a prompt) or the same tokens (a call) and a time
-// within 5 s are the same one. A live Codex prompt has no id at all: it gets one of its own, so its calls attach now.
 const SAME_CALL_MS = 5000;
 export async function matchCalls(T, rows0) {
   let rows = rows0;
   for (const r of rows) if (r.name === 'user_prompt' && r.agent === 'codex' && !r.prompt_id && r.session?.session_id) r.prompt_id = 'cx:' + String(r.dedupe).slice(0, 24);
-  // Codex prompts already stored (or earlier in this batch): the same prompt, whichever copy came first stays
   const cxp = rows.filter((r) => r.name === 'user_prompt' && r.agent === 'codex' && r.session?.session_id);
   if (cxp.length) {
     const sids = [...new Set(cxp.map((r) => r.session.session_id))], lo = Math.min(...cxp.map((r) => r.ts)) - SAME_CALL_MS, hi = Math.max(...cxp.map((r) => r.ts)) + SAME_CALL_MS;
@@ -313,7 +280,6 @@ export async function matchCalls(T, rows0) {
   const sids = [...new Set(calls.filter((r) => !r.prompt_id || r.agent === 'codex').map((r) => r.session.session_id))];
   if (!sids.length) return rows;
   const maxTs = Math.max(...calls.map((r) => r.ts)), minTs = Math.min(...calls.map((r) => r.ts));
-  // prompts of those conversations: stored, then this batch's own
   const prompts = new Map(sids.map((s) => [s, []]));
   const ph = sids.map(() => '?').join(', ');
   for (const p of await T.all(`SELECT session_id, ts, prompt_id FROM events WHERE session_id IN (${ph}) AND name = 'user_prompt' AND prompt_id IS NOT NULL AND ts <= ?`, [...sids, maxTs])) prompts.get(p.session_id)?.push([Number(p.ts), p.prompt_id]);
@@ -325,11 +291,10 @@ export async function matchCalls(T, rows0) {
     let best = null; for (const [t, id] of l) { if (t > r.ts) break; best = id; }
     if (best) r.prompt_id = best;
   }
-  // Codex calls already stored (or earlier in this batch) with the same tokens close in time: the same call
   const cx = calls.filter((r) => r.agent === 'codex');
   if (!cx.length) return rows;
   const sig = (r) => `${r.session?.session_id ?? r.session_id}|${Number(r.input_tokens) || 0}|${Number(r.output_tokens) || 0}|${Number(r.cache_read) || 0}`;
-  const known = new Map(); // signature → [ts, dedupe][]
+  const known = new Map();
   const cxs = [...new Set(cx.map((r) => r.session.session_id))];
   for (const e of await T.all(`SELECT session_id, ts, input_tokens, output_tokens, cache_read, dedupe FROM events WHERE session_id IN (${cxs.map(() => '?').join(', ')}) AND name = 'api_request' AND ts >= ? AND ts <= ?`, [...cxs, minTs - SAME_CALL_MS, maxTs + SAME_CALL_MS])) {
     const k = sig(e); if (!known.has(k)) known.set(k, []); known.get(k).push([Number(e.ts), e.dedupe]);
@@ -343,19 +308,13 @@ export async function matchCalls(T, rows0) {
   return drop.size ? rows.filter((r) => !drop.has(r)) : rows;
 }
 
-// The summary table is rebuilt in the background when it's new or its version changed (production has a lot of
-// events and a small database: the service answers from raw events until it's ready). rollupSync: wait for it (tests).
 export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {}) {
   const S = pgSql(pg);
   await S.exec(schema('pg'));
   await S.exec(rollupSchema('pg'));
   const rollup = { ready: false, building: null };
-  // writers of one person's summary rows take that person's lock: their ingests never interleave, and the background
-  // build below holds a person's lock only for one week of their events at a time
   const lockFor = async (T, users) => { for (const u of [...new Set(users)].sort()) await T.one(`SELECT pg_advisory_xact_lock(hashtext(?))`, ['joule-rollup:' + (u ?? '')]); };
   const WEEK = 7 * 864e5;
-  // Never a wipe first: each person's week is replaced in place under their lock, so a build cut off halfway (a
-  // deploy, a second instance building at the same time) leaves every row either old-and-complete or new.
   const build = async () => {
     const t = Date.now();
     for (const u of await S.all(`SELECT user_key, MIN(ts) a, MAX(ts) b FROM events GROUP BY user_key`, [])) {
@@ -371,11 +330,12 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
   if ((await rollupVersion(S)) === ROLLUP_VERSION) rollup.ready = true;
   else rollup.building = rollupSync ? await build() : build().catch((e) => log(`summary table: ${e.message}`));
 
-  // Calls stored without a cost whose model now has a published price (every Codex call before 21 Oct 2026): priced
-  // in small steps like fillPrompts, their summaries worked out again. Moves forward by id: unpriced models stay null.
-  async function fillCosts({ since = 0, step = 300, pause = 50 } = {}) {
+  const giveWay = async (busy) => { for (let i = 0; i < 60 && busy?.(); i++) await new Promise((r) => setTimeout(r, 500)); };
+
+  async function fillCosts({ since = 0, step = 300, pause = 50, busy = null } = {}) {
     let total = 0, after = 0;
     for (;;) {
+      await giveWay(busy);
       const batch = await S.all(`SELECT id, user_key, session_id, ts, model, input_tokens, output_tokens, cache_read, cache_creation FROM events
         WHERE name = 'api_request' AND cost_usd IS NULL AND model IS NOT NULL AND ts >= ? AND id > ? ORDER BY id LIMIT ?`, [since, after, step]);
       if (!batch.length) break;
@@ -396,7 +356,6 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
     }
     return total;
   }
-  // Clients stored under a spelling the catalogue folds into another ("Codex_Desktop" → "Codex Desktop"): renamed
   async function fixClientNames() {
     let n = 0;
     for (const { entrypoint: e } of await S.all(`SELECT DISTINCT entrypoint FROM sessions WHERE entrypoint IS NOT NULL`, [])) {
@@ -406,13 +365,10 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
     return n;
   }
 
-  // Calls still without their prompt (stored before calls got theirs on arrival, or whose prompt came later): matched
-  // in steps of `step` calls, each step its own short transaction with a pause after it, so a backlog of any size
-  // never holds the database (3,237 in one transaction froze the website for 9 minutes on 21 Oct 2026). Moves forward
-  // by id: a call whose prompt never arrived is looked at once per run, never in a loop.
-  async function fillPrompts({ since = 0, step = 300, pause = 50 } = {}) {
+  async function fillPrompts({ since = 0, step = 300, pause = 50, busy = null } = {}) {
     let total = 0, after = 0;
     for (;;) {
+      await giveWay(busy);
       const batch = await S.all(`SELECT id, session_id, ts FROM events WHERE name = 'api_request' AND prompt_id IS NULL AND session_id IS NOT NULL AND ts >= ? AND id > ? ORDER BY id LIMIT ?`, [since, after, step]);
       if (!batch.length) break;
       after = Number(batch.at(-1).id);
@@ -426,16 +382,13 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
       for (const [u, list] of byUser) await inTx(pg, async (T) => { await lockFor(T, [u]); await refreshRollup(T, touchedKeys(list)); });
       total += rows.length;
       if (batch.length < step) break;
-      await new Promise((r) => setTimeout(r, pause)); // let page and ingest queries through
+      await new Promise((r) => setTimeout(r, pause));
     }
     return total;
   }
 
-  // The summaries checked against the events they come from, and repaired where they differ: each person's week
-  // (events counted vs summarised) and every conversation with steps but no active time. Differences are confirmed
-  // again under the person's lock (an ingest in flight is not a difference). since: only weeks from then on.
   const ACTIVE = `'user_prompt', 'api_request', 'tool_result'`;
-  async function check({ since = 0 } = {}) {
+  async function check({ since = 0, busy = null } = {}) {
     const from = Math.floor(since / WEEK) * WEEK;
     const wk = (col) => `(${col} - (${col} % ${WEEK}))`;
     const evs = await S.all(`SELECT user_key, ${wk('ts')} w, COUNT(*) n FROM events WHERE ts >= ? GROUP BY 1, 2`, [from]);
@@ -443,6 +396,7 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
     const weeks = evs.filter((r) => sums.get(`${r.user_key}|${r.w}`) !== Number(r.n));
     const out = { weeks: [], sessions: 0, events: 0 };
     for (const r of weeks) {
+      await giveWay(busy);
       await inTx(pg, async (T) => {
         await lockFor(T, [r.user_key]);
         const w = Number(r.w);
@@ -462,10 +416,8 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
     }
     return out;
   }
-  // columns added after a table existed (Postgres: idempotent)
   for (const c of ['month_pct DOUBLE PRECISION', 'month_reset BIGINT']) await S.exec(`ALTER TABLE plan_limits ADD COLUMN IF NOT EXISTS ${c}`).catch(() => {});
   const st = statements(S);
-  // the single-row statements, turned into multi-row ones (same ON CONFLICT rules)
   const multi = (sql, rows, w) => sql.replace(/VALUES \([^)]*\)/, `VALUES ${values(rows, w)}`);
 
   async function touchAll(T, items) {
@@ -483,17 +435,14 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
     insertEvents(rows0) {
       return inTx(pg, async (T) => {
         await lockFor(T, rows0.map((r) => r.identity?.key ?? null));
-        const rows = await matchCalls(T, rows0); // each call's prompt, and one copy of each Codex call
+        const rows = await matchCalls(T, rows0);
         await touchAll(T, rows);
-        // one statement can't touch the same key twice: keep the first copy, as one-by-one inserts would
         const seen = new Set(), unique = rows.filter((r) => (r.dedupe == null || !seen.has(r.dedupe)) && (seen.add(r.dedupe), true));
         let n = 0;
         const changed = [];
         for (const c of chunks(unique)) {
-          // where rows that already exist sit now: if a written copy moved them, their old quarter hour is recomputed too
           const keys = c.map((r) => r.dedupe).filter((d) => d != null);
           const was = new Map(keys.length ? (await T.all(`SELECT dedupe, session_id, user_key, ts FROM events WHERE dedupe IN (${keys.map(() => '?').join(', ')})`, keys)).map((r) => [r.dedupe, r]) : []);
-          // only what was written (new, or changed): a resend writes nothing and recomputes nothing
           const wrote = await T.all(multi(st.insEvent, c.length, 21) + ' RETURNING dedupe, session_id, user_key, ts', c.flatMap(eventArgs));
           n += wrote.length;
           for (const r of wrote) changed.push(was.get(r.dedupe), r);

@@ -1,9 +1,3 @@
-// Read-side queries for the dashboard API. Written once for SQLite (device) and
-// Postgres (team service): see sql.js for the few helpers where the two differ.
-// Portable SQL rules used here: COUNT(*) FILTER (WHERE …) instead of SUM(condition);
-// no "bare" columns next to GROUP BY (use ROW_NUMBER); camelCase aliases are quoted;
-// 64-bit math is CAST AS BIGINT.
-
 import { rollupColumns, promptColumns, taskColumns, TASK_NAMES, QUARTER, ACTIVE_NAMES } from './rollup.js';
 import { contextWindow } from './pricing.js';
 import * as R from './flags.js';
@@ -15,10 +9,6 @@ import { planLabel, planTool, isRun, canonicalClient } from './agents.js';
 const CLIENT = `COALESCE(s.entrypoint, s.terminal_type, 'unknown')`;
 const HOUR = 3600_000;
 
-// A team's view: for each member, only what they chose to share and only since they joined.
-// scope = [{ account_id, since, all, orgs: [hash], projects: ['repo:github.com/acme/web', 'group:github.com/acme', 'dir:name'] }]
-// Accounts match on the hashed work account every event carries (context.org); projects match the
-// session's repo/folder reported by the plugin hook (session_contexts, team service only).
 function scopeClause(scope, alias, S, { ts = 'ts', org = null } = {}) {
   if (!scope.length) return { sql: '1 = 0', params: [] };
   const parts = scope.map((m) => {
@@ -41,14 +31,11 @@ function scopeClause(scope, alias, S, { ts = 'ts', org = null } = {}) {
   return { sql: `(${parts.map((x) => x.sql).join(' OR ')})`, params: parts.flatMap((x) => x.p) };
 }
 
-// Shared WHERE clause. `alias` is the events/metric_points alias.
-// ts / org: the column names on a summary row (bucket, org) instead of an event's (ts, its JSON)
 function baseWhere(f, alias, { model = false, ts = 'ts', org = null } = {}, S = null) {
   const c = [`${alias}.${ts} >= ?`, `${alias}.${ts} < ?`,
-    `NOT EXISTS (SELECT 1 FROM excluded_sessions xs WHERE xs.session_id = ${alias}.session_id)`]; // an anti-join (NOT IN can't be one)
+    `NOT EXISTS (SELECT 1 FROM excluded_sessions xs WHERE xs.session_id = ${alias}.session_id)`];
   const p = [Math.floor(f.from), Math.ceil(f.to)];
   if (f.user) { c.push(`${alias}.user_key = ?`); p.push(f.user); }
-  // Hosted service: only these people's data is ever visible (an account, or a team's members)
   if (f.members) {
     if (!f.members.length) c.push('1 = 0');
     else { c.push(`${alias}.user_key IN (${f.members.map(() => '?').join(', ')})`); p.push(...f.members); }
@@ -74,7 +61,6 @@ export function parseFilters(q) {
   };
 }
 
-// What a tool call was for, at a glance (shared with the dashboard legend).
 export const TOOL_CATEGORY = `CASE
   WHEN tool_name IN ('Read', 'Grep', 'Glob', 'LS', 'NotebookRead') THEN 'read'
   WHEN tool_name IN ('Edit', 'Write', 'MultiEdit', 'NotebookEdit') THEN 'edit'
@@ -87,7 +73,6 @@ export const CATEGORIES = ['read', 'edit', 'run', 'web', 'agent', 'mcp', 'other'
 const LANE_BUCKETS = 48;
 const TOK = `COALESCE(input_tokens,0) + COALESCE(output_tokens,0) + COALESCE(cache_read,0) + COALESCE(cache_creation,0)`;
 
-// Minutes east of UTC for a person's IANA time zone at a moment (falls back to the viewer's offset).
 function tzOffset(fallbackMin) {
   const cache = new Map();
   return (ts, tz) => {
@@ -100,19 +85,11 @@ function tzOffset(fallbackMin) {
   };
 }
 
-// Plan limits now, per account from its newest readings, and per window the highest across accounts. A window that
-// started over since its reading (reset passed, or the reading is older than the window) is unknown, not 0: nobody
-// knows what was used since (VS Code, for one, never reports). stale: no window is known any more. null: nothing seen.
 const WINDOW = { five: 5 * 3600_000, week: 7 * 864e5, month: 31 * 864e5 };
-// a window that has certainly started over since the reading: its reset time passed, or (no reset time known)
-// the reading is older than the window itself
 const startedOver = (r, k, now) => { const reset = r[k + '_reset'] == null ? null : Number(r[k + '_reset']); return reset ? reset <= now : now - Number(r[k + '_ts'] ?? r.ts) > WINDOW[k]; };
-// One account, whichever source read it: the Claude app's record and Puddle's status line both read the same Claude
-// account. Per window its newest reading that has the window counts (an older one from the other source is what
-// was used before, not more). A reading from before its tool knew the account gives way to a newer one that does.
 const orgOf = (r) => r.org || r.org_hash || '';
 export function planAccounts(rows) {
-  const known = new Map(); // tool → its newest reading that knows the account
+  const known = new Map();
   for (const r of rows) if (orgOf(r)) known.set(planTool(r.agent), Math.max(known.get(planTool(r.agent)) || 0, Number(r.ts)));
   const groups = new Map();
   for (const r of rows) {
@@ -150,8 +127,6 @@ export function planNow(rows, now = Date.now()) {
   return { stale: !five && !week && !month, five_pct: five?.pct ?? null, five_reset: five?.reset ?? null, week_pct: week?.pct ?? null, week_reset: week?.reset ?? null,
     month_pct: month?.pct ?? null, month_reset: month?.reset ?? null,
     seen,
-    // each account: used now (unknown once its window started over), when it resets if known, and as of when (per
-    // window, and the newest of them); the month from Puddle's status line is a gateway's spend limit
     agents: rows.map((r) => ({ agent: r.agent, label: r.label || null, five_ts: r.five_ts, week_ts: r.week_ts, month_ts: r.month_ts, month_from: r.month_from,
       five_pct: r.five_pct == null || startedOver(r, 'five', now) ? null : Number(r.five_pct), five_reset: r.five_reset && Number(r.five_reset) > now ? Number(r.five_reset) : null,
       week_pct: r.week_pct == null || startedOver(r, 'week', now) ? null : Number(r.week_pct), week_reset: r.week_reset && Number(r.week_reset) > now ? Number(r.week_reset) : null,
@@ -159,7 +134,6 @@ export function planNow(rows, now = Date.now()) {
       ts: Number(r.ts) })) };
 }
 
-// A project's conversations, longest first: the top 8 by name, the rest as one "other conversations" total.
 export function topConversations(list, n = 8) {
   const all = [...list].sort((a, b) => b.minutes - a.minutes), rest = all.slice(n);
   return { conversations: all.slice(0, n), more: rest.length ? { count: rest.length, minutes: Math.round(rest.reduce((a, c) => a + c.minutes, 0)) } : null };
@@ -167,30 +141,21 @@ export function topConversations(list, n = 8) {
 
 const pct = (sorted, p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))] : null);
 
-// `now` is the clock every "last N days" / "right now" reads (fixed in tests and evaluations).
-// session id → its project name (repo, else folder), from sessionProjects rows
 export const RUNS_PROJECT = 'Scripted runs';
 const ID_LIKE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/i;
 const projectOf = (rows) => ((m) => (sid) => m.get(sid) || null)(new Map(rows.map((r) => [r.session_id, r.repo || r.folder || null])));
 
-// rollup: () => true once the summary table (collector/rollup.js) is complete and kept up to date (the team service)
 export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => false } = {}) {
   const S = asSql(db);
   const { all, one } = S;
-  const workCache = new Map(); // the Work page's whole-range list, per view and range (work())
-  // every query below filters through this (it needs the dialect for team scopes)
+  const workCache = new Map();
   const where = (f, alias, opts = {}) => baseWhere(f, alias, opts, S);
   const n = S.count, J = S.json, T = S.time;
-  // Summed events over a range, as rows to add up (alias e): the summary table for the whole quarter hours inside it,
-  // the events themselves for the partial quarter hours at either end, so every answer is exactly what the events
-  // alone give. Columns: those in ROLLUP_COLS, with ts = when (a quarter hour's start, or the event's time) and
-  // max_ts = the newest event in it. Without a complete summary: events only (n = 1 each).
   const RC = rollupColumns(S, 'x');
   const RAW = [...Object.entries(RC.dims).filter(([k]) => k !== 'bucket').map(([k, v]) => `${v} AS ${k}`), 'x.ts AS ts', 'x.ts AS max_ts',
     ...Object.entries(RC.measures).filter(([k]) => k !== 'min_ts' && k !== 'max_ts').map(([k, [v]]) => `${v} AS ${k}`)].join(', ');
   const SUMMED = [...Object.keys(RC.dims).filter((k) => k !== 'bucket').map((k) => `r.${k}`), 'r.bucket AS ts', 'r.max_ts',
     ...Object.keys(RC.measures).filter((k) => k !== 'min_ts' && k !== 'max_ts').map((k) => `r.${k}`)].join(', ');
-  // The same for prompts (prompt_rollup): whole quarter hours summed, the events at the range's ends one by one
   const PC = promptColumns(S, 'x');
   const RAWP = [...Object.entries(PC.dims).filter(([k]) => k !== 'bucket').map(([k, v]) => `${v} AS ${k}`), ...Object.entries(PC.measures).map(([k, [v]]) => `${v} AS ${k}`)].join(', ');
   const SUMP = [...Object.keys(PC.dims).filter((k) => k !== 'bucket').map((k) => `r.${k}`), ...Object.keys(PC.measures).map((k) => `r.${k}`)].join(', ');
@@ -201,7 +166,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     const head = raw(f.from, A), tail = raw(B, f.to), w = where({ ...f, from: A, to: B }, 'r', { ts: 'bucket', org: 'r.org' });
     return { sql: `(${head.sql} UNION ALL SELECT ${SUMP} FROM prompt_rollup r WHERE ${w.sql} UNION ALL ${tail.sql}) e`, params: [...head.params, ...w.params, ...tail.params] };
   };
-  // The same for tasks (task_rollup): what each prompt and everything it set off cost, by part
   const TC = taskColumns(S, 'x');
   const RAWT = [...Object.entries(TC.dims).filter(([k]) => k !== 'bucket').map(([k, v]) => `${v} AS ${k}`), ...Object.entries(TC.measures).map(([k, [v]]) => `${v} AS ${k}`)].join(', ');
   const SUMT = [...Object.keys(TC.dims).filter((k) => k !== 'bucket').map((k) => `r.${k}`), ...Object.keys(TC.measures).map((k) => `r.${k}`)].join(', ');
@@ -213,20 +177,15 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     const head = raw(f.from, A), tail = raw(B, f.to), w = where({ ...f, from: A, to: B }, 'r', { ts: 'bucket', org: 'r.org' });
     return { sql: `(${head.sql} UNION ALL SELECT ${SUMT} FROM task_rollup r WHERE ${w.sql} UNION ALL ${tail.sql}) e`, params: [...head.params, ...w.params, ...tail.params] };
   };
-  // each prompt (a task) once: what it cost, its tokens, and the context its own conversation's calls ran at
   const perPrompt = (src) => all(`SELECT e.user_key, e.session_id, e.prompt_id, SUM(e.cost) cost, SUM(CASE WHEN e.part LIKE 'agent:%' THEN e.cost END) agent_cost, SUM(e.agents) agents,
       SUM(CASE WHEN e.part = 'main' THEN e.cache_read END) main_read, SUM(CASE WHEN e.part = 'main' THEN e.calls END) main_calls,
       SUM(CASE WHEN e.part = 'main' THEN COALESCE(e.input, 0) + COALESCE(e.cache_read, 0) + COALESCE(e.cache_creation, 0) END) main_in,
       SUM(COALESCE(e.input, 0) + COALESCE(e.output, 0) + COALESCE(e.cache_read, 0) + COALESCE(e.cache_creation, 0)) tok, SUM(e.calls) calls, MIN(e.min_ts) t0,
       SUM(e.input) inp, SUM(e.output) out, SUM(e.cache_read) cr, SUM(e.cache_creation) cw
     FROM ${src.sql} GROUP BY 1, 2, 3`, src.params);
-  // a prompt as a point on a chart: when, what it spent, the context per call, its tokens (all, then input, output,
-  // cache read, cache write), who
   const promptPoint = (r) => ({ t: Number(r.t0) || 0, cost: Math.round((Number(r.cost) || 0) * 1000) / 1000, ctx: Number(r.main_calls) ? Math.round(Number(r.main_in) / Number(r.main_calls)) : null,
     tok: Number(r.tok) || 0, calls: Number(r.calls) || 0, agents: Number(r.agents) || 0, u: r.user_key, s: r.session_id,
     inp: Number(r.inp) || 0, out: Number(r.out) || 0, cr: Number(r.cr) || 0, cw: Number(r.cw) || 0 });
-  // Active time from the stored runs (collector/rollup.js): per person, each conversation's runs cut to the range
-  // [from, to). A run across either end is cut at its first or last step inside, looked up from the events.
   const activeRuns = async (f) => {
     const from = Math.floor(f.from), to = Math.ceil(f.to);
     const w = where({ ...f, from: 0, to: 8.64e15 }, 'r', { ts: 'start_ts', org: 'r.org' });
@@ -246,13 +205,11 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     }
     return out;
   };
-  // runs → active stretches, parallel conversations once (what activeSegments gives from the steps themselves)
   const unionRuns = (list) => {
     const segs = (list || []).filter((x) => x.b > x.a).map((x) => [x.a, x.b]).sort((x, y) => x[0] - y[0]), out = [];
     for (const s1 of segs) { const last = out[out.length - 1]; if (last && s1[0] <= last[1]) last[1] = Math.max(last[1], s1[1]); else out.push([...s1]); }
     return out;
-  };  // each conversation's active minutes and when it was last worked on: from the stored runs ({session, a, b} per
-  // person), else from the steps themselves ({session, ts} per person)
+  };
   const sessionTimes = (runs, rows) => {
     const min = new Map(), last = new Map(), by = new Map();
     for (const list of (runs || rows || new Map()).values()) for (const r of list) { if (!by.has(r.session)) by.set(r.session, []); by.get(r.session).push(r); }
@@ -269,8 +226,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     return sessionTimes(null, new Map([['all', rows]]));
   };
 
-  // cuts: times something is split at (the activity lane's slices): a quarter hour containing one comes from the
-  // events too, so each event lands on its own side. rawOnly: events only (slices shorter than a quarter hour).
   const source = (f, { names = null, model = false, cuts = [], rawOnly = false } = {}) => {
     const nm = (a) => (names ? ` AND ${a}.name IN (${names.map((x) => `'${x}'`).join(', ')})` : '');
     const raw = (from, to) => { const w = where({ ...f, from, to }, 'x', { model }); return { sql: `SELECT ${RAW} FROM events x WHERE ${w.sql}${nm('x')}`, params: w.params }; };
@@ -326,8 +281,8 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     },
 
     async timeseries(f) {
-      const hourly = f.to - f.from <= 48 * HOUR;
-      const bucket = T('ts', hourly ? 'hour' : 'day', { local: true });
+      const hourly = f.to - f.from <= 48 * HOUR, step = hourly ? HOUR : 24 * HOUR, from = Math.floor(f.from / QUARTER) * QUARTER;
+      const bucket = `CAST((ts - ${from}) / ${step} AS INTEGER)`;
       const w = source(f, { names: ['api_request'], model: true });
       const rowsP = all(`SELECT ${bucket} bucket,
           SUM(input) input, SUM(output) output, SUM(cache_read) "cacheRead", SUM(cache_creation) "cacheCreation",
@@ -335,7 +290,8 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         FROM ${w.sql} GROUP BY bucket ORDER BY bucket`, w.params);
       const wp = source(f, { names: ['user_prompt'] });
       const [rows, prompts] = await Promise.all([rowsP, all(`SELECT ${bucket} bucket, SUM(n) n FROM ${wp.sql} GROUP BY bucket ORDER BY bucket`, wp.params)]);
-      return { granularity: hourly ? 'hour' : 'day', rows, prompts };
+      const num = (rs) => rs.map((r) => ({ ...r, bucket: Number(r.bucket) }));
+      return { granularity: hourly ? 'hour' : 'day', from, step, rows: num(rows), prompts: num(prompts) };
     },
 
     async models(f) {
@@ -344,8 +300,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         FROM events e WHERE name = 'api_request' AND ${w.sql} GROUP BY 1 ORDER BY cost DESC NULLS LAST, 1`, w.params);
     },
 
-    // calls and failures per tool, exactly, from the summary; typical and slowest times (p50, p95) from the range's
-    // 5,000 newest calls (every call's time over 90 days was the dearest read on the page)
     async tools(f) {
       const st = source(f, { names: ['tool_result'] });
       const by = new Map();
@@ -389,8 +343,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
 
     async feed(f, limit = 60) {
       const w = where(f, 'e');
-      // the newest rows first, then who and in which app for just those (joining before the limit joined every row of
-      // the range: 3.3 s for a week of a team's events, 22 Oct 2026)
       return all(`SELECT f.*, u.email, s.entrypoint client FROM (
           SELECT e.id, e.ts, e.name, e.tool_name, e.success, e.duration_ms, e.model, e.cost_usd,
             e.input_tokens, e.output_tokens, e.cache_read, e.cache_creation, e.prompt_length, e.decision, e.error, e.user_key, e.session_id, e.source, e.agent
@@ -399,7 +351,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         ORDER BY f.ts DESC, f.id DESC`, [...w.params, limit]);
     },
 
-    // Last 60 minutes, per minute, plus sessions active in the last 15 minutes.
     async live(f) {
       const now = clock();
       const lf = { ...f, from: now - 60 * 60_000, to: now + 60_000 };
@@ -433,7 +384,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       return { minutes, today: { ...today, prompts: todayPrompts }, active, now };
     },
 
-    // Visual insights: time-of-day heatmap, prompt lengths, waiting time, context use.
     async insights(f) {
       const w = where(f, 'e');
       const heat = await all(`SELECT ${T('ts', 'dow', { local: true })} AS dow, ${T('ts', 'hourOfDay', { local: true })} AS hour,
@@ -445,7 +395,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const promptLengths = (await all(`SELECT prompt_length FROM events e WHERE name = 'user_prompt' AND prompt_length IS NOT NULL AND ${w.sql} ORDER BY ts, id`, w.params))
         .map((r) => r.prompt_length);
 
-      // One row per prompt ("turn"): how long you waited, and on what.
       const wpq = where(f, 'p');
       const turns = (await all(`SELECT p.prompt_id, p.ts start, p.session_id,
           (SELECT MAX(a.ts) FROM events a WHERE a.prompt_id = p.prompt_id AND a.name IN ('api_request', 'assistant_response', 'tool_result')) end_ts,
@@ -461,7 +410,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
           return { start: t.start, wall_ms: wall, tool_ms: tool, claude_ms: wall - tool, ttft_ms: t.ttft_ms, requests: t.requests };
         });
 
-      // Context in use per request = everything the model read for that request.
       const wm = where(f, 'e', { model: true });
       const ctx = (await all(`SELECT ts, session_id, model,
           COALESCE(input_tokens,0) + COALESCE(cache_read,0) + COALESCE(cache_creation,0) ctx
@@ -478,14 +426,12 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         .sort((a, b) => b.last - a.last).slice(0, 6);
       for (const s1 of sessions) s1.client = (await one(`SELECT ${CLIENT} client FROM sessions s WHERE s.session_id = ?`, [s1.session_id]))?.client || 'unknown';
 
-      // Plan limits come only from the status line (terminal sessions, Pro/Max plans).
       const nowS = Math.floor(clock() / 1000);
       const latest = (col, reset) => one(`SELECT ts, ${col} pct, ${reset} reset FROM statusline_samples
           WHERE ${col} IS NOT NULL AND (${reset} IS NULL OR ${reset} > ?) ORDER BY ts DESC LIMIT 1`, [nowS]);
       const limitTrend = await all(`SELECT ts, five_pct, week_pct FROM statusline_samples
           WHERE (five_pct IS NOT NULL OR week_pct IS NOT NULL) AND ts > ? ORDER BY ts`, [clock() - 7 * 86400_000]);
       const statusline = await one(`SELECT COUNT(*) n, MAX(ts) last FROM statusline_samples`, []);
-      // Exact context % from the status line where available (keyed by session).
       for (const s1 of sessions) s1.exact = await one(`SELECT ctx_pct, ctx_size FROM statusline_samples WHERE session_id = ? AND ctx_pct IS NOT NULL ORDER BY ts DESC LIMIT 1`, [s1.session_id]);
       return {
         heat, promptLengths, turns, contextSessions: sessions,
@@ -493,12 +439,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       };
     },
 
-    // Timeline at any precision: buckets of `bucketMin` minutes aligned to the
-    // viewer's local clock (tzMin = minutes east of UTC), plus exact-time
-    // events and session spans for the lanes below the bars.
     async timeline(f, bucketMin, tzMin, fit = false) {
-      // Auto-fit: if activity only covers a small part of the window, frame
-      // the active part (with a little lead-in) so it isn't squeezed into a corner.
       let fitted = false;
       if (fit) {
         const wf = where(f, 'e');
@@ -511,7 +452,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       }
       if (!bucketMin) bucketMin = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].find((m) => (f.to - f.from) / (m * 60_000) <= 120) || 1440;
       const B = Math.max(1, Math.round(bucketMin)) * 60_000, off = Math.round(tzMin || 0) * 60_000;
-      // floor((ts + off) / B) for positive ts: integer division in both databases
       const bucket = `(CAST((ts + ${off}) / ${B} AS BIGINT) * ${B} - ${off})`;
       const w = where(f, 'e', { model: true });
       const buckets = await all(`SELECT ${bucket} t,
@@ -536,7 +476,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       return { bucketMs: B, from: f.from, to: f.to, fitted, buckets, byUser, events, sessions };
     },
 
-    // Tokens per local day and person (the team calendar's hover): only days someone used tokens.
     async daysByUser(f, tzMin) {
       const day = T('ts', 'day', { offSec: Math.round(tzMin || 0) * 60 });
       const w = where(f, 'e');
@@ -544,8 +483,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       return all(`SELECT ${day} AS day, user_key, SUM(tok) tokens FROM ${src.sql} GROUP BY 1, 2 HAVING SUM(tok) > 0 ORDER BY 1`, src.params);
     },
 
-    // Lines added and removed, per project (projectOf(session) → its name) and local day: how each project grows or
-    // shrinks. The 5 busiest projects by name, the rest as "Other".
     async codeLines(f, tzMin, projectOf = () => null) {
       const day = T('ts', 'day', { offSec: Math.round(tzMin || 0) * 60 });
       const w = where(f, 'e');
@@ -568,7 +505,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       return top.map((p) => ({ ...p, days: [...p.days.values()].sort((a, b) => (a.day < b.day ? -1 : 1)) }));
     },
 
-    // Per local day (tzMin = minutes east of UTC) for streaks and the "today" tower.
     async days(f, tzMin) {
       const day = T('ts', 'day', { offSec: Math.round(tzMin || 0) * 60 });
       const w = where(f, 'e');
@@ -580,11 +516,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         FROM ${src.sql} GROUP BY 1 ORDER BY 1`, src.params);
     },
 
-    // Everything a manager needs per person, for the range and the period before it.
-    // parts: 'all' (everything, one answer), or 'core' (the table, headline and flags; the calendar and code
-    // changes then come from teamCalendar / teamLines, loaded when their cards are on screen)
-    // skip: parts of the answer the viewer's hidden cards would need ('recent': the projects behind "What the team is
-    // on"; 'features': the names behind "Features in use"). The rest is shared by many cards, so it's always worked out.
     async team(f, tzMin = 0, { single = false, parts = 'all', skip = [] } = {}) {
       const core = parts === 'core', skips = new Set(skip);
       const day = T('ts', 'day', { offSec: Math.round(tzMin) * 60 });
@@ -595,11 +526,9 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         .filter((u) => !f.members || f.members.includes(u.user_key));
       const per = async (sql, params) => { const m = new Map(); for (const r of await all(sql, params)) m.set(r.user_key, r); return m; };
       const group = async (sql, params) => { const m = new Map(); for (const r of await all(sql, params)) { if (!m.has(r.user_key)) m.set(r.user_key, []); m.get(r.user_key).push(r); } return m; };
-      // The most recent row per person (portable "latest row per group").
       const latestPer = (cols, from, cond, params) => per(`SELECT ${cols} FROM (SELECT ${cols}, ROW_NUMBER() OVER (PARTITION BY user_key ORDER BY ts DESC, id DESC) rn
           FROM ${from} WHERE ${cond}) x WHERE rn = 1`, params);
 
-      // sums over the range: summary rows plus the events at its ends (see `source`)
       const sw = source(f), sp = source({ ...f, from: f.from - len, to: f.from });
       const add = (cond, col = 'n') => `SUM(CASE WHEN ${cond} THEN ${col} ELSE 0 END)`;
       const stat$ = per(`SELECT e.user_key,
@@ -636,12 +565,9 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const sPr = source(f, { names: ['user_prompt'] }), sPrReq = source(f, { names: ['user_prompt', 'api_request'] });
       const clients$ = group(`SELECT e.user_key, ${CLIENT} client, COUNT(DISTINCT e.session_id) n FROM ${sPr.sql} JOIN sessions s ON s.session_id = e.session_id
           GROUP BY 1, 2 ORDER BY 3 DESC, 2`, sPr.params);
-      // right now: the app each person works in (their latest session) and their latest effort level (later rows win)
       const clientNow$ = per(`SELECT user_key, client FROM (SELECT e.user_key, ${CLIENT} client, MAX(e.max_ts) t FROM ${sPrReq.sql} JOIN sessions s ON s.session_id = e.session_id
           GROUP BY 1, 2) x ORDER BY t`, sPrReq.params);
       const effortNow$ = per(`SELECT user_key, effort FROM (SELECT e.user_key, effort, MAX(e.max_ts) t FROM ${sReq.sql} WHERE effort IS NOT NULL GROUP BY 1, 2) x ORDER BY t`, sReq.params);
-      // how full conversations get: per session, the most of the model's window one call used (window from the
-      // call itself when the tool says it, e.g. Codex; else the model's known size)
       const ctxRows$ = group(`SELECT e.user_key, e.session_id, e.model, MAX(ctx_max) used, MAX(win_max) win FROM ${sReq.sql} WHERE compact = 0 GROUP BY 1, 2, 3`, sReq.params);
       const contextOf = (k) => {
         const peaks = (ctxRows.get(k) || []).map((r) => Math.min(1, Number(r.used) / (Number(r.win) || contextWindow(r.model)))).filter((x) => x > 0).sort((a, b) => a - b);
@@ -651,21 +577,15 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const sNames = source(f, { names: ['skill_activated', 'api_request', 'subagent_completed'] });
       const names$ = skips.has('features') ? Promise.resolve(new Map()) : group(`SELECT e.user_key, CASE name WHEN 'skill_activated' THEN 'skill' WHEN 'api_request' THEN 'mcp' ELSE 'agent' END kind, label, SUM(n) n
           FROM ${sNames.sql} WHERE label IS NOT NULL GROUP BY 1, 2, 3 ORDER BY 4 DESC, 3`, sNames.params);
-      // only this view's people (a team's members), never everyone on the service
       const mem = f.members ? { sql: `user_key IN (${f.members.map(() => '?').join(', ') || 'NULL'})`, p: f.members } : { sql: '1 = 1', p: [] };
-      // plugins loaded in the last 90 days (not every load ever)
       const plugins$ = skips.has('features') ? Promise.resolve(new Map()) : group(`SELECT user_key, ${J('attrs_json', 'plugin.name')} label, MAX(ts) ts FROM events
           WHERE name = 'plugin_loaded' AND ts >= ? AND ${mem.sql} GROUP BY 1, 2 ORDER BY 1, 2`, [clock() - 90 * 864e5, ...mem.p]);
       const wm = where(f, 'm');
       const metrics$ = group(`SELECT m.user_key, name, type, SUM(value) v FROM metric_points m WHERE ${wm.sql} GROUP BY 1, 2, 3`, wm.params);
-      // last 7 local days, independent of the selected range
-      // (prompt times from the per-prompt summary: when each prompt was sent, without reading every prompt event)
       const prompted = (g) => { const src = promptSource(g); return { sql: `(SELECT e.user_key, e.up_min AS ts, e.up FROM ${src.sql} WHERE e.up > 0) e`, params: src.params }; };
       const p7 = prompted({ ...f, from: clock() - 7 * 86400_000, to: clock() + 60_000 });
       const days$ = group(`SELECT user_key, ${day} AS day, SUM(up) prompts FROM ${p7.sql} GROUP BY 1, 2 ORDER BY 1, 2`, p7.params);
-      // wall time per prompt (prompt → last response or tool result)
       const wpp = where(f, 'p');
-      // one join, not a lookup per prompt (prompts with no answer have no wait, as before: the median skips them)
       const waitsRaw = (extra = '', ps = []) => all(`SELECT p.user_key, MAX(a.ts) - p.ts wall FROM events p JOIN events a ON a.prompt_id = p.prompt_id
           AND a.name IN ('api_request', 'assistant_response', 'tool_result')
           WHERE p.name = 'user_prompt' AND p.prompt_id IS NOT NULL AND ${wpp.sql}${extra} GROUP BY p.id, p.user_key, p.ts`, [...wpp.params, ...ps]);
@@ -673,8 +593,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       let waitRows;
       if (!rollup()) waitRows = await waitsRaw();
       else {
-        // from the per-prompt summary: when the prompt was sent (in the range) to its last answer (whenever); a prompt
-        // sent more than once (rare) from its events, each send its own wait as before
         const sw2 = promptSource(f);
         const per1 = await all(`SELECT p.user_key, p.prompt_id, p.ups, p.t, MAX(q.ans_max) a FROM (SELECT e.user_key, e.prompt_id, SUM(up) ups, MIN(up_min) t FROM ${sw2.sql}
             GROUP BY 1, 2 HAVING SUM(up) > 0) p JOIN prompt_rollup q ON q.prompt_id = p.prompt_id GROUP BY p.user_key, p.prompt_id, p.ups, p.t`, sw2.params);
@@ -689,13 +607,10 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
           (SELECT sl.five_pct FROM statusline_samples sl JOIN sessions s2 ON s2.session_id = sl.session_id WHERE s2.user_key = ss.user_key AND sl.five_pct IS NOT NULL ORDER BY sl.ts DESC LIMIT 1) five_pct,
           (SELECT sl.week_pct FROM statusline_samples sl JOIN sessions s2 ON s2.session_id = sl.session_id WHERE s2.user_key = ss.user_key AND sl.week_pct IS NOT NULL ORDER BY sl.ts DESC LIMIT 1) week_pct
         FROM (SELECT DISTINCT user_key FROM sessions WHERE ${mem.sql}) ss`, mem.p);
-      // plan limits as Puddle reports them (the Claude app, the status line, Codex logs): the newest per tool and
-      // account, last 8 days. A team sees only the accounts each person shares with it ("everything": all of them).
       const planRows = new Map(), planOf = (k) => planNow(planRows.get(k), clock());
       const shares = new Map((f.scope || []).map((m) => [m.account_id, m]));
-      // account names the service knows ("Dcvx", "Max"), never on this Mac's own database
       const plan$ = (async () => {
-      let accRows = []; try { accRows = await all(`SELECT account_id, org_hash, label FROM device_accounts`, []); } catch { /* the Mac's own database has none */ }
+      let accRows = []; try { accRows = await all(`SELECT account_id, org_hash, label FROM device_accounts`, []); } catch {  }
       const accName = new Map(accRows.map((r) => [`${r.account_id}|${r.org_hash}`, r.label]));
       for (const r of await all(`SELECT * FROM plan_limits WHERE ts > ?${f.members ? ` AND user_key IN (${f.members.map(() => '?').join(',') || 'NULL'})` : ''}`, [clock() - 8 * 864e5, ...(f.members || [])])) {
         const m = shares.get(r.user_key);
@@ -706,11 +621,9 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       }
       })();
 
-      // What each person does: tool calls by kind, over the range and right now.
       const sTool = source(f, { names: ['tool_result'] });
       const mix$ = group(`SELECT e.user_key, ${TOOL_CATEGORY} cat, SUM(n) n FROM ${sTool.sql} GROUP BY 1, 2`, sTool.params);
       const size = Math.max(60_000, Math.ceil((f.to - f.from) / LANE_BUCKETS));
-      // whole quarter hours inside one slice from the summary; those a slice boundary cuts through from the events
       const cuts = Array.from({ length: LANE_BUCKETS + 1 }, (_, k) => Math.floor(f.from) + k * size);
       const sLane = source(f, { names: ['user_prompt', 'tool_result', 'api_error'], cuts, rawOnly: size < QUARTER });
       const lanes$ = group(`SELECT e.user_key, CAST((ts - ${Math.floor(f.from)}) / ${size} AS BIGINT) b, ${add(`name = 'user_prompt'`)} p,
@@ -718,8 +631,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
           ${add(`name = 'tool_result'`, 'fails')} + ${add(`name = 'api_error'`)} fail
         FROM ${sLane.sql} GROUP BY 1, 2`, sLane.params);
       const wn = where({ ...f, from: clock() - 2 * 86400_000, to: clock() + 60_000 }, 'e');
-      // what each person did last: per person the newest row straight from the index (user, kind, time), not a
-      // window over two days of everyone's events; a view that narrows what it shares keeps the general query
       const everything = !f.scope || f.scope.every((m) => m.all);
       const latestRowOf = (names, cols) => (async () => {
         const m = new Map();
@@ -730,14 +641,11 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       })();
       const lastEv$ = f.members && everything ? latestRowOf(['user_prompt', 'api_request', 'tool_result', 'tool_decision'], 'name, tool_name')
         : latestPer('user_key, ts, id, name, tool_name', 'events e', `name IN ('user_prompt', 'api_request', 'tool_result', 'tool_decision') AND ${wn.sql}`, wn.params);
-      // the conversations each person has going right now (the last 10 minutes): which agent, in which app, and when
-      // each last moved, so a row shows "Claude Code ×3 · Codex" when several run at once (pages keep it live)
       const wa = where({ ...f, from: clock() - 10 * 60_000, to: clock() + 60_000 }, 'e');
       const active$ = group(`SELECT e.user_key, e.session_id, e.agent, s.entrypoint, MAX(e.ts) ts FROM events e LEFT JOIN sessions s ON s.session_id = e.session_id
           WHERE e.session_id IS NOT NULL AND e.name IN ('user_prompt', 'api_request', 'tool_result', 'tool_decision') AND ${wa.sql} GROUP BY 1, 2, 3, 4`, wa.params);
       const lastTool$ = f.members && everything ? latestRowOf(['tool_result', 'tool_decision'], `tool_name, ${TOOL_CATEGORY} cat`)
         : latestPer('user_key, ts, id, cat, tool_name', `(SELECT e.*, ${TOOL_CATEGORY} cat FROM events e WHERE name IN ('tool_result', 'tool_decision') AND ${wn.sql}) e`, '1 = 1', wn.params);
-      // when each person was last seen at all: per person and kind, the newest row straight from the index
       const ever = new Map();
       const ever$ = (async () => {
         if (f.members) {
@@ -745,19 +653,15 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
           for (const [u, r] of await Promise.all(probes)) if (r?.ts != null && Number(r.ts) > (ever.get(u)?.ts || 0)) ever.set(u, { user_key: u, ts: Number(r.ts) });
         } else for (const [k, v] of await per(`SELECT user_key, MAX(ts) ts FROM events WHERE name IN ('user_prompt', 'api_request', 'tool_result') GROUP BY user_key`, [])) ever.set(k, v);
       })();
-      // Usual level: the 28 days before this period, per day the person was active.
       const wb = where({ ...f, from: f.from - 28 * 86400_000, to: f.from }, 'e');
       const sb = source({ ...f, from: f.from - 28 * 86400_000, to: f.from });
       const usual$ = per(`SELECT e.user_key, SUM(CASE WHEN name = 'api_request' THEN tok END) tokens, ${add(`name = 'user_prompt'`)} prompts,
           COUNT(DISTINCT CASE WHEN name = 'user_prompt' THEN ${day} END) days
         FROM ${sb.sql} GROUP BY e.user_key`, sb.params);
-      // ---- inputs for "Needs a look" (see flags.js) ----
       const toolStats$ = group(`SELECT e.user_key, tool_name tool, SUM(n) calls, SUM(fails) fails FROM ${sTool.sql} GROUP BY 1, 2 ORDER BY 1, 2`, sTool.params);
-      // prompts with 4+ failed steps in the range (from the per-prompt summary); only those are read step by step
       const sStuck = promptSource(f);
       const streaks = new Map();
       const stuck$ = (async () => {
-      // (the 50 most recent of them: their steps are read one by one)
       const stuckPrompts = (await all(`SELECT prompt_id FROM ${sStuck.sql} GROUP BY prompt_id HAVING SUM(fails) >= 4 ORDER BY MAX(ans_max) DESC LIMIT 50`, sStuck.params)).map((r) => r.prompt_id);
       if (stuckPrompts.length) {
         const rowsS = await all(`SELECT user_key, prompt_id, tool_name, success FROM events WHERE name = 'tool_result' AND prompt_id IN (${stuckPrompts.map(() => '?').join(',')}) ORDER BY prompt_id, ts, id`, stuckPrompts);
@@ -784,7 +688,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const versions$ = group(`SELECT user_key, app_version v FROM sessions WHERE app_version IS NOT NULL AND last_seen > ? GROUP BY 1, 2 ORDER BY 1, 2`, [clock() - 14 * 86400_000]);
       const p60 = prompted({ ...f, from: clock() - 60 * 86400_000, to: clock() + 60_000 });
       const promptTimes$ = group(`SELECT e.user_key, ts FROM ${p60.sql} ORDER BY ts`, p60.params);
-      // Feedback: "not an issue" hides that kind of flag for that person for 14 days (latest verdict wins).
       const fb$ = all(`SELECT user_key, kind, verdict, ts FROM (SELECT user_key, kind, verdict, ts,
           ROW_NUMBER() OVER (PARTITION BY user_key, kind ORDER BY ts DESC, id DESC) rn FROM flag_feedback WHERE ts > ?) x WHERE rn = 1`, [clock() - 14 * 86400_000]);
       const fbOf = (u, k) => fb.find((r) => r.user_key === u && r.kind === k);
@@ -795,12 +698,8 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const p2 = prompted({ ...f, from: clock() - 2 * 86400_000, to: clock() + 60_000 });
       const lastPrompt$ = per(`SELECT e.user_key, MAX(ts) ts FROM ${p2.sql} GROUP BY e.user_key`, p2.params);
 
-      // ---- inputs for the plain-language view (insights-text.js) ----
-      // per prompt: how many tool steps the agent took on its own, and whether one failed
       const sPrompt = promptSource(f);
       const runsBy$ = group(`SELECT e.user_key, e.prompt_id, SUM(up) up, SUM(steps) steps, SUM(fails) fails FROM ${sPrompt.sql} GROUP BY 1, 2`, sPrompt.params);
-      // active time (gaps under 5 minutes, parallel conversations once) and when it happened, in local time
-      // from the stored runs once they're complete, else from the steps themselves (the same answer)
       const act$ = rollup() ? Promise.all([activeRuns(f), activeRuns({ ...f, from: f.from - len, to: f.from }), null, null])
         : Promise.all([null, null, group(`SELECT e.user_key, e.session_id session, ts FROM events e WHERE name IN ('user_prompt', 'api_request', 'tool_result') AND ${w.sql}`, w.params),
           group(`SELECT e.user_key, e.session_id session, ts FROM events e WHERE name IN ('user_prompt', 'api_request', 'tool_result') AND ${wp.sql}`, wp.params)]);
@@ -820,12 +719,8 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         for (const k of Object.keys(h)) h[k] = Math.round(h[k]);
         return h;
       };
-      // projects (team service: the repo or folder each conversation ran in, as the plugin reported it)
-      const projectRows$ = skips.has('recent') && core ? Promise.resolve([]) : this.sessionProjects(f); // code changes need them (the full answer)
+      const projectRows$ = skips.has('recent') && core ? Promise.resolve([]) : this.sessionProjects(f);
 
-      // every query above was started at once (they don't depend on each other): here they're all waited for
-      // per person, from the tasks summary: their most expensive task (how much of it sub-agents made) and how much
-      // context their main conversation re-reads per call (long conversations make every call dearer)
       const tsrc = taskSource(f);
       const promptRows = [];
       const taskFacts$ = (async () => {
@@ -843,7 +738,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       })();
       const [stat, prev, models, effort, clients, clientNow, effortNow, ctxRows, names, plugins, metrics, days, limits, mix, lanes, lastEv, lastTool, usual, toolStats, hooks, apiErr, asksBy, compactAuto, versions, promptTimes, fb, lastPrompt, runsBy, projectRows, [runsNow, runsPrev, actRows, prevRows], waits, , , , taskFacts, activeNow] = await Promise.all([
         stat$, prev$, models$, effort$, clients$, clientNow$, effortNow$, ctxRows$, names$, plugins$, metrics$, days$, limits$, mix$, lanes$, lastEv$, lastTool$, usual$, toolStats$, hooks$, apiErr$, asksBy$, compactAuto$, versions$, promptTimes$, fb$, lastPrompt$, runsBy$, projectRows$, act$, waits$, plan$, ever$, stuck$, taskFacts$, active$]);
-      // the team's usual context re-read per call (people with enough calls), to say when someone's is far above it
       const rereads = [...taskFacts.values()].filter((x) => x.mainCalls >= 50).map((x) => x.rereadPerCall).sort((a, b) => a - b);
       const teamTool = new Map();
       for (const rows of toolStats.values()) for (const r of rows) { const t = teamTool.get(r.tool) || { calls: 0, fails: 0 }; t.calls += r.calls; t.fails += r.fails; teamTool.set(r.tool, t); }
@@ -907,12 +801,8 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
             sessions: (activeNow.get(u.user_key) || []).map((r) => ({ id: r.session_id, agent: r.agent, client: canonicalClient(r.entrypoint) || null, ts: Number(r.ts) })),
           },
         };
-        // Things a manager may want to look at — see flags.js for each rule.
         const k = u.user_key;
         const mine = (toolStats.get(k) || []).map((r) => ({ tool: r.tool || 'unknown', calls: r.calls, fails: r.fails }));
-        // Expected failure rate per tool: the rest of the team, smoothed toward a
-        // sensible default for that kind of tool. Never the person's own history,
-        // which would hide a problem they have always had.
         const ref = (tool) => {
           const t = teamTool.get(tool) || { calls: 0, fails: 0 }, me = mine.find((x) => x.tool === tool) || { calls: 0, fails: 0 };
           return ((t.fails - me.fails) + 20 * DEFAULT_FAIL[catOf(tool)]) / ((t.calls - me.calls) + 20);
@@ -933,7 +823,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
           R.heavyRule({ prompts, tokens: row.tokens }, usual.get(k)),
           ...R.taskRules(taskFacts.get(k), rereads),
           R.versionRule(newestOf(versions.get(k) || []), teamNewest, [...versions.keys()].length),
-          // the team service: is their Mac set up properly (see service/health.js)
           ...(f.setup ? R.setupRules(f.setup.byUser?.get(k), row, { latest: f.setup.latest, now, tzMin }) : []),
         ].filter(Boolean);
         row.hiddenFlags = flags.filter((fl) => fbOf(k, fl.kind)?.verdict === 'no').map((fl) => fl.kind);
@@ -951,9 +840,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const active = people.filter((p) => p.prompts > 0);
       const sum = (k, arr = people) => arr.reduce((a, p) => a + (k(p) || 0), 0);
       const fbWhere = f.members ? `WHERE user_key IN (${f.members.map(() => '?').join(',') || 'NULL'})` : '';
-      // projects: active time per repo (or folder), who worked there
       const { min: sessionMin, last: sessionLast } = sessionTimes(runsNow, actRows);
-      // what the work was about: projects (repo, else folder), each with its conversations (title, who, time)
       const projMap = new Map();
       for (const r of projectRows) {
         const name = r.repo || (r.folder ? r.folder : null); if (!name) continue;
@@ -963,13 +850,11 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         pr.conversations.push({ title: r.title || null, user_key: r.user_key, minutes: Math.round(m), last: sessionLast.get(r.session_id) || null });
         projMap.set(name, pr);
       }
-      // each project's prompts in order, as a small chart: what each spent, and the context it ran at
       const projectOfSession = new Map(projectRows.map((r) => [r.session_id, r.repo || r.folder || null]));
       const seriesOf = new Map();
       for (const r of promptRows) { const n = projectOfSession.get(r.session_id); if (!n) continue; if (!seriesOf.has(n)) seriesOf.set(n, []); seriesOf.get(n).push(promptPoint(r)); }
       const all$ = [...projMap.values()].map((x) => ({ ...x, minutes: Math.round(x.minutes), people: [...x.people], last: Math.max(0, ...x.conversations.map((c) => c.last || 0)),
         series: (seriesOf.get(x.name) || []).sort((a, b) => a.t - b.t).slice(-40).map(({ inp, out, cr, cw, ...pt }) => pt), ...topConversations(x.conversations) }));
-      // what's shown: each person's 3 latest projects (one person: their 6 latest), newest first
       const shown = new Set();
       if (single) for (const x of [...all$].sort((a, b) => b.last - a.last).slice(0, 6)) shown.add(x.name);
       else for (const u of new Set(projectRows.map((r) => r.user_key))) {
@@ -977,25 +862,21 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         for (const x of all$.filter((x) => x.people.includes(u)).sort((a, b) => last(b) - last(a)).slice(0, 3)) shown.add(x.name);
       }
       const projects = all$.filter((x) => shown.has(x.name)).sort((a, b) => b.last - a.last);
-      // what everyone is on: each person's latest conversation (one person's page: their last 5), newest first
       const seenConv = new Set(), seenPerson = new Set();
       const convs = projectRows.filter((r) => (r.repo || r.folder) && !seenConv.has(r.session_id) && seenConv.add(r.session_id))
         .map((r) => ({ user_key: r.user_key, session_id: r.session_id, title: r.title || null, project: r.repo || r.folder, last: sessionLast.get(r.session_id) || null, minutes: Math.round(sessionMin.get(r.session_id) || 0) }))
         .filter((c) => c.last && c.minutes >= 1).sort((a, b) => b.last - a.last);
       const recent = single ? convs.slice(0, 5) : convs.filter((c) => !seenPerson.has(c.user_key) && seenPerson.add(c.user_key));
-      // the calendar's window: a year back (earlier months fill a wide card), whatever the range
       const cal = { ...f, from: Math.min(f.from, clock() - 366 * 864e5), to: Math.max(f.to, clock() + 60_000) };
       const prevMinutes = (runsPrev ? [...runsPrev.values()].map(unionRuns) : [...prevRows.values()].map((rows) => activeSegments(rows)))
         .reduce((a, segs) => a + segs.reduce((x, [p, q]) => x + (q - p) / 60_000, 0), 0);
       return {
         summary: teamSummary(people, { prevMinutes: prevMinutes >= 1 ? Math.round(prevMinutes) : null }),
         projects, recent,
-        // tokens per day for the calendar: a year back (earlier months fill a wide card), whatever the range
-        // lines changed per project and day (projects as on the projects card: repo, else folder)
         ...(core ? {} : {
           codeLines: await this.codeLines(f, tzMin, projectOf(projectRows)),
           daily: await this.days(cal, tzMin),
-          dailyByUser: f.scope && !single ? await this.daysByUser(cal, tzMin) : [], // a team view's hover lists each person (one person's page doesn't need it)
+          dailyByUser: f.scope && !single ? await this.daysByUser(cal, tzMin) : [],
         }),
         headline: {
           people: people.length,
@@ -1020,10 +901,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       };
     },
 
-    // Which project each conversation with a prompt in the range belongs to (team service: what the plugin or app
-    // reported in session_contexts; none on a single device).
-    // One project (repo, else folder) over the range, unfolding: every prompt in order (what it spent, the context it
-    // ran at, its tokens, who), each conversation with its own prompts, each person's share, and the totals.
     async project(f, name) {
       const sp = (await this.sessionProjects(f)).filter((r) => (r.repo || r.folder) === name);
       if (!sp.length) return null;
@@ -1038,28 +915,17 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         inp: sum(list, 'inp'), out: sum(list, 'out'), cr: sum(list, 'cr'), cw: sum(list, 'cw') }))
         .sort((a, b) => b.last - a.last);
       const people = new Map(); for (const x of prompts) { const p = people.get(x.u) || { user_key: x.u, cost: 0, prompts: 0 }; p.cost += x.cost; p.prompts++; people.set(x.u, p); }
-      // everyone this view may see, in the team page's order (first seen): the same colour for the same person
       const team = (await this.filters(f)).users.map((u) => ({ user_key: u.user_key, name: u.name || (u.email ? u.email.split('@')[0] : 'someone') }));
       return { name, repo: Boolean(sp[0].repo), range: { from: f.from, to: f.to }, team,
         totals: { cost: Math.round(sum(prompts, 'cost') * 100) / 100, tok: sum(prompts, 'tok'), prompts: prompts.length, conversations: conversations.length,
           ctx: med(prompts.map((x) => x.ctx)), perPrompt: med(prompts.map((x) => x.cost)), inp: sum(prompts, 'inp'), out: sum(prompts, 'out'), cr: sum(prompts, 'cr'), cw: sum(prompts, 'cw') },
-        // each prompt once, as a row: [time, cost, context per call, tokens, calls, sub-agents, person #, conversation #,
-        // input, output, cache read, cache write]
-        // (person # into `team`, conversation # into `conversations`): a 90-day project was 1.5 MB as objects
         prompt: ['t', 'cost', 'ctx', 'tok', 'calls', 'agents', 'u', 's', 'inp', 'out', 'cr', 'cw'],
         prompts: prompts.map((x) => [x.t, x.cost, x.ctx, x.tok, x.calls, x.agents, team.findIndex((m) => m.user_key === x.u), conversations.findIndex((c) => c.session_id === x.s), x.inp, x.out, x.cr, x.cw]),
         conversations, people: [...people.values()].map((p) => ({ ...p, cost: Math.round(p.cost * 100) / 100 })).sort((a, b) => b.cost - a.cost) };
     },
 
-    // Every conversation in the range, a page at a time (the Work page): its project, who, how long it was worked on,
-    // its tokens, what it spent; newest first, or the longest / most tokens / most spent first; narrowed to one person
-    // or one project. The lists to narrow by cover the whole range.
-    // new data arrived (the service's notify): what was worked out before it is no longer whole
     changed() { workCache.clear(); },
-    // The whole range is worked out once and kept for 30 s, or until new data arrives (changed()): paging, sorting and
-    // narrowing then reuse it (each click used to redo all four summaries).
     async work(f, { page = 1, per = 25, person = null, project = null, sort = 'recent' } = {}) {
-      // the page asks with the time it was clicked, so the range is keyed to 30 s (a click later is the same list)
       const key = JSON.stringify({ ...f, from: Math.floor(f.from / 30_000), to: Math.floor(f.to / 30_000) }), now = Date.now();
       let hit = workCache.get(key);
       if (!hit || now - hit.at > 30_000) {
@@ -1071,8 +937,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const { list: all, team } = await hit.list;
       const list = [...all];
       const by = { time: 'minutes', tokens: 'tok', cost: 'cost' }[sort];
-      if (by) list.sort((a, b) => b[by] - a[by] || (b.last || 0) - (a.last || 0)); // ties: the newer first
-      // everyone this view may see, in the team page's order (the same colour for the same person); who to narrow by
+      if (by) list.sort((a, b) => b[by] - a[by] || (b.last || 0) - (a.last || 0));
       const people = team.filter((u) => list.some((x) => x.user_key === u.user_key)).map((u) => u.user_key);
       const projects = [...new Set(list.map((x) => x.project))].sort((a, b) => a.localeCompare(b));
       const rows = list.filter((x) => (!person || x.user_key === person) && (!project || x.project === project));
@@ -1099,32 +964,23 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     },
 
     async sessionProjects(f) {
-      // conversations with a prompt in the range: from the per-prompt summary (its rows, not every prompt event)
       const src = promptSource(f);
       let rows;
       try {
         rows = await all(`SELECT DISTINCT e.user_key, e.session_id, sc.repo, sc.folder, sc.title, s.entrypoint FROM ${src.sql} JOIN session_contexts sc ON sc.session_id = e.session_id
           LEFT JOIN sessions s ON s.session_id = e.session_id WHERE e.up > 0`, src.params);
       } catch { return []; }
-      // scripted and background runs (codex exec, the SDK, the Codex app's own work) are one group, never a project
-      // each; a folder named like an id with no repository is a scratch folder, not a project (21 Oct 2026: 157
-      // `codex exec` runs showed as id-named projects)
       return rows.flatMap(({ entrypoint, ...r }) => (isRun(entrypoint) ? [{ ...r, repo: null, folder: RUNS_PROJECT }]
         : !r.repo && ID_LIKE.test(String(r.folder || '')) ? [] : [r]));
     },
-    // The tokens-per-day calendar: a year back (earlier months fill a wide card), whatever the range; with each
-    // person's share of every day on a team view.
     async teamCalendar(f, tzMin = 0, { byUser = Boolean(f.scope) } = {}) {
       const cal = { ...f, from: Math.min(f.from, clock() - 366 * 864e5), to: Math.max(f.to, clock() + 60_000) };
       return { daily: await this.days(cal, tzMin), dailyByUser: byUser ? await this.daysByUser(cal, tzMin) : [] };
     },
-    // Code changes per project and day, projects as on the projects card (repo, else folder).
     async teamLines(f, tzMin = 0) {
       return { codeLines: await this.codeLines(f, tzMin, projectOf(await this.sessionProjects(f))) };
     },
 
-    // One person, deep: their row as the team sees it (same scope), their rhythm and forecasts, their tools.
-    // Used by Me (the app and the website) and by a team lead opening someone from the team page.
     async person(f, tzMin, userKey, { parts = 'all', skip = [] } = {}) {
       if (!userKey || (f.members && !f.members.includes(userKey))) return null;
       const one = { ...f, members: [userKey], user: null };
@@ -1132,7 +988,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const row = t.people.find((p) => p.user_key === userKey);
       if (!row) return null;
       const now = clock();
-      // their active stretches over 90 days: the stored runs when the summaries are complete, else the events
       let rows;
       if (rollup()) {
         const w = where({ ...one, from: 0, to: 8.64e15 }, 'r', { ts: 'start_ts', org: 'r.org' });
@@ -1143,6 +998,25 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       }
       const tools = (await this.tools(one)).slice(0, 8);
       return { person: row, rhythm: rhythm(rows, { now, tz: tzMin }), tools, range: { from: f.from, to: f.to }, projects: t.projects, recent: t.recent, ...(parts === 'core' ? {} : { daily: t.daily, codeLines: t.codeLines }) };
+    },
+
+    async prompts(f) {
+      const w = where(f, 'p');
+      const rows = await all(`SELECT p.ts, p.user_key, p.agent, p.prompt_length len,
+          SUM(COALESCE(a.input_tokens,0) + COALESCE(a.output_tokens,0) + COALESCE(a.cache_read,0) + COALESCE(a.cache_creation,0)) tokens,
+          SUM(a.output_tokens) output, MAX(COALESCE(a.input_tokens,0) + COALESCE(a.cache_read,0) + COALESCE(a.cache_creation,0)) ctx,
+          MAX(a.model) model, COUNT(a.id) requests, SUM(a.cost_usd) cost, MAX(a.ts) end_ts,
+          (SELECT COUNT(*) FROM events t WHERE t.prompt_id = p.prompt_id AND t.name = 'tool_result') steps
+        FROM events p LEFT JOIN events a ON a.prompt_id = p.prompt_id AND a.name = 'api_request'
+        WHERE p.name = 'user_prompt' AND p.prompt_id IS NOT NULL AND ${w.sql}
+        GROUP BY p.id, p.ts, p.user_key, p.agent, p.prompt_length, p.prompt_id ORDER BY p.ts`, w.params);
+      return rows.map((r) => {
+        const ts = Number(r.ts), win = contextWindow(r.model), ctx = Number(r.ctx) || 0;
+        return { ts, user: r.user_key, agent: r.agent, model: r.model || null, tokens: Number(r.tokens) || 0, output: Number(r.output) || 0,
+          context: ctx ? Math.min(100, Math.round((ctx / win) * 100)) : null, window: win, requests: Number(r.requests) || 0,
+          steps: Number(r.steps) || 0, cost: r.cost == null ? null : Number(r.cost), len: r.len == null ? null : Number(r.len),
+          took: r.end_ts ? Math.max(0, Number(r.end_ts) - ts) : 0 };
+      });
     },
 
     async filters(f = {}) {
@@ -1157,7 +1031,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     async health(f = {}) {
       const m = where({ from: 0, to: 8.64e15, members: f.members }, 'e');
       const mm = where({ from: 0, to: 8.64e15, members: f.members }, 'm');
-      // everything ever stored for these people: from the summary (with the events at the very end)
       const ever = source({ from: 0, to: 8.64e15, members: f.members }), hour = source({ from: clock() - 3600_000 + 1, to: 8.64e15, members: f.members });
       const bySource = await all(`SELECT source, SUM(n) n, MAX(max_ts) t FROM ${ever.sql} GROUP BY source`, ever.params);
       return {

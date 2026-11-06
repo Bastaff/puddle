@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-// Automated health check for the whole Puddle setup on this machine.
-//   npm run verify          everything that doesn't disturb you
-//   npm run verify -- --app also restarts the menu bar app to self-test it (it relaunches afterwards)
-// Every check prints ✓ / ✗ / – (skipped) with what it means. Read-only except --app.
-
+import { dataDir } from '../collector/env.js';
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = os.homedir();
-const JOULE = process.env.JOULE_DIR || path.join(HOME, '.joule');
+const JOULE = dataDir(HOME);
 const APP = path.join(ROOT, 'companion-app', 'target', 'debug', 'joule');
 const results = [];
 const ok = (area, name, pass, detail = '') => results.push({ area, name, pass, detail });
@@ -21,7 +17,6 @@ const get = async (url, opts = {}) => { try { const r = await fetch(url, { ...op
 const sh = (cmd, args, o = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000, ...o });
 const read = (f) => { try { return fs.readFileSync(f, 'utf8').trim(); } catch { return null; } };
 
-// ---------- code ----------
 try { const out = sh('npm', ['test'], { cwd: ROOT }); const m = out.match(/ℹ pass (\d+)[\s\S]*ℹ fail (\d+)/); ok('Code', 'Automated tests', m && m[2] === '0', m ? `${m[1]} passed, ${m[2]} failed` : 'no summary'); }
 catch (e) { const m = String(e.stdout).match(/ℹ fail (\d+)/); ok('Code', 'Automated tests', false, m ? `${m[1]} failing` : 'test run failed'); }
 try { sh('claude', ['plugin', 'validate', '--strict', path.join(ROOT, 'plugin')]); ok('Code', 'Claude Code plugin passes strict validation', true); }
@@ -30,16 +25,14 @@ const cargoEnv = { ...process.env, PATH: `/opt/homebrew/opt/rustup/bin:${HOME}/.
 try { sh('cargo', ['build'], { cwd: path.join(ROOT, 'companion-app'), env: cargoEnv }); ok('Code', 'Menu bar app builds', true); }
 catch (e) { ok('Code', 'Menu bar app builds', false, e.code === 'ENOENT' ? 'Rust not installed' : String(e.stderr).split('\n').find((l) => l.startsWith('error')) || 'build failed'); }
 
-// ---------- connection (plugin setup) ----------
 const url = read(path.join(JOULE, 'url')), token = read(path.join(JOULE, 'token'));
-ok('Connection', 'This Mac is connected (/joule setup ran)', !!(url && token), url ? `service ${url}` : 'no ~/.joule/token: run /joule');
+ok('Connection', 'This Mac is connected (Puddle signed in)', !!(url && token), url ? `service ${url}` : 'no token: sign in to Puddle');
 const settings = read(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude'), 'settings.json')) || '';
 ok('Connection', 'Claude Code sends usage to Puddle', settings.includes('OTEL_EXPORTER_OTLP_ENDPOINT') && (!url || settings.includes(url)), settings.includes('OTEL_LOG_USER_PROMPTS": "0') || settings.includes('"OTEL_LOG_USER_PROMPTS":"0"') ? 'prompt text logging off' : 'check OTEL_LOG_USER_PROMPTS');
 const codex = read(path.join(process.env.CODEX_HOME || path.join(HOME, '.codex'), 'config.toml')) || '';
 if (!codex) skip('Connection', 'Codex sends usage to Puddle', 'Codex not set up on this Mac');
 else ok('Connection', 'Codex sends usage to Puddle', codex.includes('# >>> joule') && codex.includes('log_user_prompt = false'), codex.includes('# >>> joule') ? 'config block present' : 'no Puddle block in ~/.codex/config.toml');
 
-// ---------- services ----------
 const svc = url || 'http://127.0.0.1:4500';
 const login = await get(`${svc}/login`);
 ok('Team service', 'Team service is up', login.status === 200, `${svc} → ${login.status || login.body}`);
@@ -47,7 +40,6 @@ if (token && login.status === 200) {
   const link = await get(`${svc}/api/auth/device-link`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
   ok('Team service', 'Device key is valid (app can open Team signed in)', link.status === 200, link.status === 401 ? 'key revoked or unknown: run /joule again' : `status ${link.status}`);
 }
-// Ask the service itself (its database may be Postgres anywhere): sign in with the device key like the app does.
 if (token && login.status === 200) {
   try {
     const link = JSON.parse((await get(`${svc}/api/auth/device-link`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })).body).url;
@@ -78,15 +70,14 @@ const me = await get('http://127.0.0.1:4601/api/highlights');
 ok('Me', 'Personal dashboard is up', me.status === 200, me.status === 200 ? (() => { const h = JSON.parse(me.body); return `${h.agentHours} h, streak ${h.streak.current}, ${h.persona || 'no persona yet'}`; })() : 'part of the companion');
 for (const f of ['personal.db', 'companion.json', 'token']) {
   const p = path.join(JOULE, f);
-  if (fs.existsSync(p)) { const mode = fs.statSync(p).mode & 0o777; ok('Privacy', `~/.joule/${f} readable only by you`, (mode & 0o077) === 0, mode.toString(8)); }
+  if (fs.existsSync(p)) { const mode = fs.statSync(p).mode & 0o777; ok('Privacy', `${f} readable only by you`, (mode & 0o077) === 0, mode.toString(8)); }
 }
 
-// ---------- the app itself (restarts it) ----------
 if (process.argv.includes('--app') && fs.existsSync(APP)) {
   const running = (() => { try { sh('pgrep', ['-x', 'joule']); return true; } catch { return false; } })();
   try { sh('pkill', ['-x', 'joule']); } catch {}
   const run = (mode) => new Promise((resolve) => {
-    const p = spawn(APP, [], { env: { ...process.env, JOULE_SELFTEST: mode } });
+    const p = spawn(APP, [], { env: { ...process.env, PUDDLE_SELFTEST: mode } });
     let out = ''; p.stderr.on('data', (d) => (out += d));
     setTimeout(() => { p.kill(); resolve(out); }, 14_000);
   });
@@ -95,12 +86,11 @@ if (process.argv.includes('--app') && fs.existsSync(APP)) {
   ok('Menu bar app', 'Team opens inside the app, signed in', /team window at Some\("\/"\)/.test(team), (team.match(/team window at (.*?),/) || [])[1] || 'no output');
   const choices = path.join(JOULE, 'companion.json'), saved = read(choices);
   const done = await run('done');
-  if (saved) fs.writeFileSync(choices, saved, { mode: 0o600 }); // the self-test doesn't change your choices
+  if (saved) fs.writeFileSync(choices, saved, { mode: 0o600 });
   ok('Menu bar app', 'Done closes onboarding and opens Me', /main visible after = Some\(Ok\(false\)\), me visible = Some\(Ok\(true\)\)/.test(done), (done.match(/main visible after = (.*)/) || [])[1] || 'no output');
   if (running) spawn(APP, [], { detached: true, stdio: 'ignore' }).unref();
 } else skip('Menu bar app', 'Self-test of the real app', process.argv.includes('--app') ? 'app not built' : 'add --app (restarts the app briefly)');
 
-// ---------- report ----------
 let area = '';
 for (const r of results) {
   if (r.area !== area) { area = r.area; console.log(`\n${area}`); }

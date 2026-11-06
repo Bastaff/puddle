@@ -1,6 +1,3 @@
-// One name per repository, everywhere: "github.com/acme/web".
-// git@github.com:Acme/Web.git, https://user:token@github.com/acme/web/ and ssh://git@github.com/acme/web
-// all become the same key. Credentials never survive. null when it isn't a remote URL.
 export function canonicalRepo(url) {
   if (!url) return null;
   const m = String(url).trim().match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/](.+?)(?:\.git)?\/?$/i);
@@ -10,7 +7,6 @@ export function canonicalRepo(url) {
   return `${m[1].toLowerCase()}/${parts.join('/').toLowerCase()}`;
 }
 
-// "github.com/acme/web" → { host: "github.com", owner: "acme", name: "web", group: "github.com/acme" }
 export function repoParts(key) {
   if (!key) return null;
   const parts = key.split('/');

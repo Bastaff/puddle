@@ -1,7 +1,3 @@
-// Codex data as it really arrives (test/fixtures: captured from Codex 0.162 in the terminal and 0.163 in the Codex
-// app on 21 Oct 2026, private values replaced): every call priced and tied to its prompt on arrival, one name per
-// app, the app's own background work told apart, no log lines stored as events, and the same conversation sent live
-// and from Codex's own files stored once.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -42,7 +38,6 @@ test('stored: calls on their prompt at once, and the conversation sent live and 
   try {
     const live = rowsOf(load('codex-live-desktop.json'));
     await store.insertEvents(live);
-    // the same conversation from Codex's own file, as the Mac's mirror sends it (collector/backfill.js → mirror.js)
     const x = parseRollout(fs.readFileSync(new URL('./fixtures/codex-history-desktop.jsonl', import.meta.url), 'utf8'));
     const who = { 'user.email': 'dev@example.test', agent: 'codex', 'session.id': HELLO, 'app.entrypoint': 'Codex Desktop', recovered_from: 'codex log' };
     const hist = [...x.prompts.map((p) => eventRow('user_prompt', p.ts, { ...who, 'prompt.id': p.id, prompt_length: p.length })),
@@ -100,7 +95,7 @@ test('who is running what right now: each live conversation\'s agent and app, in
     const t = Date.now() - 60_000, rows = [];
     const ev = (sid, agent, entry, k) => eventRow('api_request', t + k * 1000, { 'user.account_uuid': 'u1', 'session.id': sid, agent, 'app.entrypoint': entry, model: 'm', input_tokens: 1, output_tokens: 1, request_id: `${sid}-${k}` });
     rows.push(ev('c1', 'claude-code', 'cli', 0), ev('c2', 'claude-code', 'cli', 1), ev('v1', 'claude-code', 'claude-vscode', 2), ev('x1', 'codex', 'Codex_Desktop', 3));
-    rows.push(eventRow('api_request', Date.now() - 3600_000, { 'user.account_uuid': 'u1', 'session.id': 'old', agent: 'codex', 'app.entrypoint': 'codex-tui', model: 'm', request_id: 'old-1' })); // an hour ago: not now
+    rows.push(eventRow('api_request', Date.now() - 3600_000, { 'user.account_uuid': 'u1', 'session.id': 'old', agent: 'codex', 'app.entrypoint': 'codex-tui', model: 'm', request_id: 'old-1' }));
     await store.insertEvents(rows);
     const q = makeQueries(store.sql, { now: () => Date.now(), rollup: () => true });
     const team = await q.team({ from: Date.now() - 864e5, to: Date.now() + 60_000, members: ['u1'], scope: [{ account_id: 'u1', all: true, since: 0 }], user: null }, 0, { parts: 'core' });

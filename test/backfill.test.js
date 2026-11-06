@@ -9,10 +9,8 @@ import { parseLogs } from '../collector/otlp.js';
 import { openDb } from '../collector/db.js';
 
 test('cost estimate matches Claude Code telemetry for real requests', () => {
-  // Desktop test message (opus-5-5, 1h cache write) -> telemetry said $0.1711584
   assert.equal(+estimateCost('claude-opus-5-5', { input_tokens: 2, output_tokens: 463, cache_read_input_tokens: 41332,
     cache_creation_input_tokens: 19203, cache_creation: { ephemeral_1h_input_tokens: 19203, ephemeral_5m_input_tokens: 0 } }).toFixed(7), 0.1711584);
-  // CLI self-test (haiku-5-5) -> telemetry said $0.00317
   assert.equal(+estimateCost('claude-haiku-5-5', { input_tokens: 4, output_tokens: 178, cache_read_input_tokens: 34343,
     cache_creation_input_tokens: 13684, cache_creation: { ephemeral_1h_input_tokens: 13684 } }).toFixed(5), 0.00317);
   assert.equal(estimateCost('some-unknown-model', { input_tokens: 1 }), null);
@@ -42,12 +40,11 @@ test('recovery fills gaps, never double counts, and telemetry replaces recovered
   fs.writeFileSync(path.join(projects, 's1.jsonl'), transcript);
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ on: true, since: '2025-12-31T00:00:00Z' }));
   process.env.CLAUDE_CONFIG_DIR = dir;
-  process.env.CODEX_HOME = path.join(dir, 'codex'); // no Codex history here (never this Mac's real one)
+  process.env.CODEX_HOME = path.join(dir, 'codex');
   const { makeBackfill } = await import('../collector/backfill.js?fresh=' + Date.now());
   const store = openDb(path.join(dir, 'u.db'));
   const bf = makeBackfill(store.db, { home: dir, notify() {}, log() {} });
 
-  // Telemetry already delivered the prompt, but missed the request and tool call.
   const s = (key, v) => ({ key, value: { stringValue: String(v) } });
   store.insertEvents(parseLogs({ resourceLogs: [{ scopeLogs: [{ logRecords: [{ timeUnixNano: String(Date.parse('2026-01-01T10:00:00Z') * 1e6), attributes: [
     s('event.name', 'user_prompt'), s('session.id', 's1'), s('prompt.id', 'p1'), s('prompt_length', 11), s('user.account_uuid', 'acc')] }] }] }] }));
@@ -59,11 +56,9 @@ test('recovery fills gaps, never double counts, and telemetry replaces recovered
   const count = () => store.db.prepare('SELECT name, source, output_tokens, cost_usd FROM events ORDER BY name').all();
   assert.equal(count().length, 4);
 
-  // Running again (even a full rescan) adds nothing.
   bf.run({ full: true });
   assert.equal(count().length, 4);
 
-  // Late telemetry for the same request replaces the recovered row instead of adding one.
   store.insertEvents(parseLogs({ resourceLogs: [{ scopeLogs: [{ logRecords: [{ timeUnixNano: String(Date.parse('2026-01-01T10:00:02Z') * 1e6), attributes: [
     s('event.name', 'api_request'), s('session.id', 's1'), s('request_id', 'req_1'), s('model', 'claude-opus-5-5'),
     s('input_tokens', 2), s('output_tokens', 50), s('cache_read_tokens', 100), s('cache_creation_tokens', 0), s('cost_usd', 0.001028)] }] }] }] }));
@@ -71,7 +66,6 @@ test('recovery fills gaps, never double counts, and telemetry replaces recovered
   assert.equal(api.length, 1);
   assert.equal(api[0].source, 'otel');
 
-  // After a reset, nothing older is resurrected.
   store.db.exec('DELETE FROM events');
   bf.markReset();
   bf.run({ full: true });

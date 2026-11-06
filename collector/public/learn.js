@@ -1,11 +1,7 @@
-// Learn mode: plain-language explanations for everything on the dashboard,
-// shown under the normal tooltip when the "?" toggle in the top bar is on.
-// Written for people who don't use Claude Code every day.
 'use strict';
 
 const LEARN = (() => {
   const T = {
-    // ---- one person (Me, or a teammate's page) ----
     'pv:state': 'What this person\'s agent is doing right now: the kind of step it is taking, thinking between steps, idle (a few minutes quiet) or away.',
     'pv:range': 'The time window the tiles, the work and Task size cover: today since midnight, or the last 7 or 30 days.',
     'pv:today': 'Active time with agents today: the stretches where steps follow each other less than 5 minutes apart. Two conversations at once count once.',
@@ -21,19 +17,19 @@ const LEARN = (() => {
     'pv:projects': 'The latest conversations, by the title Claude Code gave them, with their project (its git repository, or the folder when there is none), how long each was worked on and when. Open one to see how it spent its tokens; "See all" lists every one.',
     'pv:flags': 'Things worth a look, found by fixed rules: a tool or connector that keeps failing, rate limits, being stuck retrying, an old Claude Code, or having stopped. Nothing here means nothing unusual.',
     'pv:hands': 'Task size: how big the tasks are that get handed over: questions (no tools), short tasks, or long tasks of 20+ steps without stepping in.',
+    'pv:prompts': 'Your prompts in the window you pick (15 minutes to 24 hours), in time slots: above, the tokens each slot\'s prompts took (re-reading the conversation counts too); below, how full the fullest conversation among them got (red from 90%, the dashed line). Hover a slot for its numbers.',
     'pv:day': 'Today hour by hour (orange) over the typical day (grey: the average of active days in the last 8 weeks). The dashed line is now.',
     'pv:rhythm': 'Tokens used each day. Beige is a day without agent work; the deeper the blue, the more tokens. Days in the chosen range are full colour, earlier ones faded. Hover a day for its numbers.',
-    // ---- top bar ----
     'bar:range': 'The time window everything on the page covers. 1D = today since midnight, 7D/30D/90D = the last 7, 30 or 90 days. Changes like ▲12% compare with the window just before it.',
     'bar:arrange': 'Arrange the page your way: the cards jiggle; drag one anywhere, pick its size (S, M, L or Full), or tap the eye to hide it. Hidden cards wait in the tray under this button (the number on it) and aren’t loaded until you bring one back: tap it, or drag it where you want it. Kept with your account.',
-    'bar:health': 'Is tracking working? OK means the collector on this Mac is receiving data from Claude Code. Click for details, recovery and a self-test.',
+    'bar:health': 'Whether what you see is current. Live: it updates by itself. Connecting: the live connection is reopening. No internet, Busy or Reconnecting: you\u2019re looking at what was here at the time it says, and it catches up by itself. On a team\u2019s page a click shows the details.',
     'bar:sound': 'Soft sounds when something happens: a prompt, an answer, a tool, a failure. Each person has a different pitch, so you can hear who is working.',
     'bar:theme': 'Light or dark look. Auto follows your computer’s setting.',
     'bar:learn': 'Learn mode: hover anything for an explanation like this one. Turn it off when you know your way around.',
     'bar:demo': 'You are looking at a made-up team so you can see how the dashboard behaves with many people. Your real data is untouched. Click to go back.',
 
-    // ---- cards ----
     'card:summary': 'The period in plain sentences, written from fixed rules over the numbers (no AI guessing). Hover a sentence to see the numbers behind it. Click a person to see their own profile here.',
+    'card:prompts': 'The team\'s prompts in the window you pick (15 minutes to 24 hours), in time slots: above, the tokens each slot took, split by person in the colour of their dot in the table; below, how full the fullest conversation got (red from 90%, the dashed line). Hover a slot for who used how much.',
     'card:lines': 'Lines of code added and removed, per project, from the agents\' own records (counts only, never the code). Each line is a project\'s running total (added minus removed), so you see which projects grow and which shrink.',
     'card:projects': 'Active Projects: each person\'s latest conversation, newest first: its title, the project (its git repository, or the folder when there is none), how long it was worked on, and when. Open one to see how it spent its tokens; "See all" lists every conversation, a page at a time.',
     'kpi:time': 'Active time with agents: the stretches where steps follow each other less than 5 minutes apart. Two conversations at once count once.',
@@ -44,13 +40,11 @@ const LEARN = (() => {
     'card:team': 'Everyone on the team, one row each. Read it left to right: what they are doing right now, when they worked, what kind of work, how much, how independently Claude works for them, and how often things fail.',
     'card:timeline': 'Tokens used over time. A token is a small piece of text (roughly ¾ of a word) that Claude reads or writes; it is the unit usage is measured in. Tall bars = busy moments. The line below adds them up. Drag across the chart to zoom in.',
     'card:features': 'Which Claude Code features the team actually uses. The bar shows the share of active people who used it; the faces show who. Useful to spot features nobody has discovered yet.',
-    'card:mix': 'What Claude spent its actions on: reading code, editing files, running commands, browsing the web and so on. The list shows the individual tools Claude used most. Red at the end of a bar = calls that failed.',
     'card:issues': 'Things worth a look, worked out automatically from the data. They are facts, not judgements: someone may simply be on holiday. Click one to focus that person.',
     'card:map': 'Where the team is, based on each person’s time zone (the pin sits on that time zone’s city, not their exact location). A pulsing ring means they are working right now.',
     'card:rhythm': 'Tokens the team used each day. Beige is a day without agent work; the deeper the blue, the more tokens. Days in the chosen range are full colour, earlier ones faded. Hover a day for its numbers.',
     'card:models': 'Which Claude models people use, how hard they let Claude think (effort), and which app they use it from. Cache hits show how much was reused instead of read again, which makes Claude faster and cheaper.',
 
-    // ---- headline tiles ----
     'kpi:active': 'How many people have Claude working for them right now (activity in the last 90 seconds). Dot colours show the kind of work.',
     'kpi:sessions': 'A conversation is one chat with Claude, from opening it until it is closed or replaced by a new one (Claude Code calls this a session). Inside it Claude remembers everything said so far; a new conversation starts with a clean slate. Many short conversations usually means one per task; few long ones means people keep working in the same chat.',
     'kpi:prompts': 'A prompt is one message a person sends to Claude, like “fix the login bug”. Claude may then take many steps on its own to do it.',
@@ -58,7 +52,6 @@ const LEARN = (() => {
     'kpi:wait': 'Typical time (minutes:seconds) from sending a prompt until Claude has finished working on it. Long waits often mean Claude is doing a lot on its own, which is not bad in itself.',
     'kpi:output': 'Lines of code Claude added or changed in files for the team (from Claude Code’s own count).',
 
-    // ---- board columns ----
     'col:now': 'The coloured tile shows what Claude is doing for this person right now: reading, editing, running a command, browsing… It pulses while they are working and turns grey when they are idle or away.',
     'col:lane': 'Their activity across the selected period, left = start, right = now. Each column is a slice of time: height = how many actions Claude took, colours = the kind of work, little dark ticks = their prompts, red dots = bursts of failures. Everyone shares the same scale, so you can compare rows.',
     'col:mix': 'What the agent spends its steps on for this person: the bar shows every kind of work, the words name the top three with their share, and the line below the tools used most. Click a person to open their page.',
@@ -66,7 +59,6 @@ const LEARN = (() => {
     'col:autonomy': 'How big the tasks are that this person hands to the agent. Three bars, each as tall as its share of prompts: questions (no steps), short tasks (1–19 steps on its own), long tasks (20+ steps). The word underneath: Long tasks when at least 15% of prompts run 20+ steps, Questions when most use no tools, otherwise Short tasks.',
     'col:limits': 'How much of their plan is used. Outer ring: the 5-hour window; inner ring: the week (Codex: the month). Blue is fine, amber from 80%, red from 95%. Hover for exact numbers and when each resets.',
 
-    // ---- kinds of work ----
     'cat:read': 'Reading: Claude looks at files or searches through code to understand it before acting.',
     'cat:edit': 'Editing: Claude changes or creates files.',
     'cat:run': 'Running: Claude runs commands in a terminal, such as tests, builds or scripts.',
@@ -75,7 +67,6 @@ const LEARN = (() => {
     'cat:mcp': 'MCP: Claude uses a connector to another app or service, such as GitHub, Linear, Slack or a browser.',
     'cat:other': 'Other: planning and bookkeeping, like keeping a to-do list or asking the person a question.',
 
-    // ---- flags ----
     'flag:quiet': 'Someone who normally uses Claude Code on most working days has sent nothing for at least 4 working days, clearly longer than their usual breaks. Weekends don’t count, and occasional users never get this flag. It may be holiday, other work, or that they got stuck.',
     'flag:failures': 'Claude’s actions fail far more often for this person than the same kinds of actions do for the rest of the team (statistically clear, at least 20 actions). Often a setup problem: a missing tool, wrong permissions or a broken test environment.',
     'flag:broken': 'One tool or connector fails most of the time (60% or more, at least 6 tries). That is almost always a setup problem, such as an expired login for that connector.',
@@ -99,7 +90,6 @@ const LEARN = (() => {
     'flag:titles': 'Most of their conversations reached the team without a title. Titles come from Claude Code and the Claude app on their Mac; an older Puddle doesn’t read them all.',
     'flag:macerrors': 'Puddle on their Mac reported its own errors in the last day (for example sending plan limits or projects). They are also in Puddle’s error table, so they can be fixed.',
 
-    // ---- features ----
     'feat:skills': 'Skills are packaged instructions Claude can load for a specific job, like making a spreadsheet or following a team process.',
     'feat:mcp': 'MCP connectors link Claude to other tools and services (GitHub, Linear, Slack, a browser…). MCP stands for Model Context Protocol.',
     'feat:subagents': 'Subagents are helpers Claude starts for part of a task, for example to search a large codebase while it keeps working.',
@@ -108,14 +98,12 @@ const LEARN = (() => {
     'feat:mentions': '@-mentions: the person pointed Claude at a specific file or folder by typing @ and its name.',
     'feat:plugins': 'Plugins add ready-made commands, skills or connectors to Claude Code.',
 
-    // ---- models card ----
     'mix:Models': 'Claude comes in sizes. Opus = most capable, Sonnet = balanced, Haiku = fastest and lightest. Shares are by tokens.',
     'mix:Effort': 'How much thinking Claude is allowed per step. Higher effort = more careful but slower and uses more tokens.',
     'mix:Client': 'Where people use Claude Code: cli = the terminal, desktop = the Claude desktop app, vscode/jetbrains = inside a code editor.',
     'mix:Cache hits': 'Share of what Claude read that was reused from a cache instead of read fresh. Higher is better: faster and cheaper.',
   };
 
-  // Built-in Claude Code tools, in plain words.
   const TOOLS = {
     Read: 'Opens and reads a file.',
     Write: 'Creates a new file or replaces a file’s whole content.',
@@ -144,7 +132,6 @@ const LEARN = (() => {
     ToolSearch: 'Looks up extra tools Claude can load when it needs them.',
     SlashCommand: 'Runs one of the person’s saved / commands.',
   };
-  // Connectors (MCP servers) people commonly have.
   const SERVERS = {
     claude_browser: 'the browser built into the Claude desktop app',
     'claude-in-chrome': 'the person’s own Chrome browser',
@@ -158,7 +145,6 @@ const LEARN = (() => {
     terminal: 'the terminal panel of the Claude desktop app',
     visualize: 'inline charts and diagrams in the chat',
   };
-  // What common MCP action names do.
   const ACTIONS = [
     [/batch/, 'runs several steps in one go (for example: open a page, click, take a screenshot)'],
     [/navigate|open|goto/, 'opens a page or location'],
@@ -204,5 +190,4 @@ const LEARN = (() => {
     tool,
   };
 })();
-// pages built as modules (Me, person pages: tips.js) read it from here; a top-level const is not on globalThis
 globalThis.LEARN = LEARN;

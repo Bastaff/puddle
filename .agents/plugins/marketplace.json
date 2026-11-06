@@ -1,8 +1,8 @@
 {
-  "name": "joule",
+  "name": "puddle",
   "owner": { "name": "Puddle" },
   "plugins": [
-    { "name": "joule", "source": { "source": "local", "path": "./plugin" }, "policy": { "installation": "AVAILABLE" }, "category": "Productivity",
+    { "name": "puddle", "source": { "source": "local", "path": "./plugin" }, "policy": { "installation": "AVAILABLE" }, "category": "Productivity",
       "description": "Private usage dashboard for Claude Code and Codex — counts and lengths only, never prompts." }
   ]
 }

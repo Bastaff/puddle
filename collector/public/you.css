@@ -1,5 +1,3 @@
-/* One person, deep (you.js): Me on the Mac and the public "You" page. The team dashboard's own
-   pieces (.bar, .kpis/.kpi, .card from styles.css); only the charts inside the cards are new. */
 .you { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
 .you .kpis { grid-column: 1 / -1; }
 .you .card { gap: 10px; align-items: stretch; }
@@ -39,7 +37,7 @@
 .wbar .ghost { background: none; border: 2px dashed var(--axis); box-sizing: border-box; }
 .wbar small { font-weight: 800; color: var(--muted); font-size: 11px; }
 .wbar span { font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; min-height: 1em; }
-.yheat { display: flex; flex-direction: column; gap: 3px; width: 100%; max-width: calc(28px + 24 * 21px); } /* cells stay squares */
+.yheat { display: flex; flex-direction: column; gap: 3px; width: 100%; max-width: calc(28px + 24 * 21px); }
 .yrow { display: grid; grid-template-columns: 28px repeat(24, 1fr); gap: 3px; align-items: center; }
 .yrow small { font-size: 10.5px; color: var(--muted); font-weight: 700; }
 .yrow i { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--grid); }
@@ -51,15 +49,13 @@
 .wk i.none { background: var(--grid); }
 @media (max-width: 900px) { .you .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .you { grid-template-columns: 1fr; } .you .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-/* the page shell shared by Me and You: the dashboard's top bar over a centred column */
 .you-wrap { max-width: 1240px; margin: 0 auto; padding: var(--gap) 16px 48px; display: flex; flex-direction: column; gap: var(--gap); }
 .bar .bar-src { font-size: 12px; color: var(--muted); margin-left: 6px; }
 .chip-me { background: var(--wash); color: var(--ink); }
 @media (max-width: 760px) { .bar .bar-src { display: none; } }
 .you-profile { margin: 0; font-size: 15px; font-weight: 700; color: var(--ink); }
 
-/* ---------- one person (person.js): Me, and a teammate opened from the team page ---------- */
-.pv { max-width: 1240px; margin: 0 auto; padding: var(--gap) 16px 48px; } /* its cards: an arranged grid (layout.js, .lgrid) */
+.pv { max-width: 1600px; margin: 0 auto; padding: var(--gap) 16px 48px; }
 .pv .card { gap: 10px; }
 .pv-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; border-left: 5px solid var(--c); }
 .pv-head .pv-back { grid-column: 1 / -1; font-size: 12.5px; font-weight: 700; color: var(--ink-2); text-decoration: none; }
@@ -113,13 +109,10 @@
 .pv .learn-x { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); background: color-mix(in srgb, var(--s4) 14%, transparent); border-radius: calc(10px * var(--sq)); padding: 7px 10px; }
 .pv > .pv-learn-row { grid-column: 1 / -1; }
 .pv-learn[aria-pressed="true"] { background: var(--s4); color: var(--ink); }
-.pv .kpis { grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); } /* 5 or 6 tiles, whatever is known */
+.pv .kpis { grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); }
 @media (max-width: 560px) { .wk-row { grid-template-columns: minmax(100px, 1fr) minmax(30px, 1fr) 38px; } .wk-row small { display: none; } }
 
 
-/* Projects & conversations: what the work was about */
-
-/* Me: Plan limits (person.js planCard): per account, 5 hours and week, used and left */
 .pv-plan .pl-a { font-size: 12px; font-weight: 800; color: var(--muted); margin: 8px 0 2px; }
 .pv-plan .pl-row { display: grid; grid-template-columns: 58px minmax(0, 1fr); grid-template-areas: "l b" "v v" "w w"; column-gap: 10px; row-gap: 3px; align-items: center; padding: 6px 0; }
 .pv-plan .pl-l { grid-area: l; font-size: 12.5px; font-weight: 700; }
@@ -132,10 +125,22 @@
 .pv-plan .pl-v { grid-area: v; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .pv-plan small { grid-area: w; color: var(--muted); font-size: 11.5px; }
 
-/* the public "You" page (service/you-page.js): its title, source line, footer and the live mark */
 .you-wrap h1 { margin: 4px 0 0; font-size: 22px; letter-spacing: -0.02em; }
 .you-wrap .src { color: var(--muted); font-size: 12.5px; margin: 0; }
 .you-wrap .foot { text-align: center; font-size: 12.5px; color: var(--muted); }
 .you-wrap .foot a { color: var(--ink-2); font-weight: 700; }
-.bar .live { font-size: 12px; font-weight: 800; color: var(--good-text); display: flex; align-items: center; gap: 6px; margin-left: auto; }
-.bar .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; corner-shape: round; background: var(--good); }
+.bar span.live { font-size: 12px; font-weight: 800; color: var(--good-text); display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.bar span.live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; corner-shape: round; background: var(--good); }
+
+.pub-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; max-width: 1240px; margin: 0 auto; padding: 28px 16px 10px; }
+.pub-av { width: 64px; height: 64px; border-radius: 50%; corner-shape: round; display: grid; place-items: center; background: var(--s2); color: #fff; font-size: 34px; font-weight: 800; line-height: 1; box-shadow: 0 6px 18px color-mix(in srgb, var(--s2) 30%, transparent); margin-bottom: 4px; }
+.pub-hero h1 { margin: 0; font-size: 34px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.pub-sub { margin: 0; font-size: 15px; color: var(--ink-2); max-width: 520px; }
+.pub-made { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 12px 6px 7px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-sm); color: var(--muted); font-size: 12.5px; font-weight: 600; text-decoration: none; transition: transform .15s, box-shadow .15s; }
+.pub-made img { border-radius: 6px; }
+.pub-made b { color: var(--ink); font-weight: 800; }
+.pub-made:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.pub-page .pv-bar { justify-content: center; }
+@media (max-width: 560px) { .pub-hero h1 { font-size: 28px; } }
+.pub-foot { text-align: center; font-size: 12.5px; color: var(--muted); margin: 14px auto 32px; padding: 0 16px; }
+.pub-page .brand { text-decoration: none; color: inherit; }

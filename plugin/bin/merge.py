@@ -1,12 +1,11 @@
-# Puddle settings merge — Python fallback with the same contract as merge.js.
-import json, os, sys
+import json, re, os, sys
 
 def parse(p):
     if not os.path.exists(p): return {}
     t = open(p, encoding='utf-8').read()
     return json.loads(t) if t.strip() else {}
 
-def ours(v): return isinstance(v, str) and 'joule' in v.lower()
+def ours(v): return isinstance(v, str) and ('puddle' in v.lower() or 'joule' in v.lower())
 
 def main(a):
     cmd, f = a[0], a[1]
@@ -15,7 +14,7 @@ def main(a):
     backup, arg = a[2], a[3]
     if cmd in ('statusline-on', 'statusline-off'):
         wrapper, prev, s = backup, arg, parse(f)
-        def ours_sl(sl): return isinstance(sl, dict) and isinstance(sl.get('command'), str) and wrapper in sl['command']
+        def ours_sl(sl): return isinstance(sl, dict) and isinstance(sl.get('command'), str) and (wrapper in sl['command'] or re.search(r'/\.(puddle|joule)(-dev)?/statusline\.sh', sl['command']) is not None)
         def rm(p):
             if os.path.exists(p): os.remove(p)
         if cmd == 'statusline-on':
@@ -39,11 +38,12 @@ def main(a):
     if cmd == 'on':
         env = json.loads(arg); s = parse(f); cur = s.get('env', {})
         ep = cur.get('OTEL_EXPORTER_OTLP_ENDPOINT') or cur.get('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT')
-        if ep and ep != env.get('OTEL_EXPORTER_OTLP_ENDPOINT') and not ours(cur.get('JOULE')):
-            print('JOULE3:' + ep); return 3
+        if ep and ep != env.get('OTEL_EXPORTER_OTLP_ENDPOINT') and not ours(cur.get('PUDDLE')) and not ours(cur.get('JOULE')):
+            print('PUDDLE3:' + ep); return 3
         if not os.path.exists(backup):
             open(backup, 'w', encoding='utf-8').write(open(f, encoding='utf-8').read() if os.path.exists(f) else '')
         s['env'] = {**cur, **env}
+        if 'PUDDLE' in env: s['env'].pop('JOULE', None)
         open(f, 'w', encoding='utf-8').write(json.dumps(s, indent=2, ensure_ascii=False) + '\n'); return 0
     if cmd == 'off':
         keys = json.loads(arg)

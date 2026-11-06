@@ -1,0 +1,244 @@
+#!/bin/sh
+set -u
+
+PUDDLE_DIR="${PUDDLE_DIR:-${JOULE_DIR:-}}" PUDDLE_URL="${PUDDLE_URL:-${JOULE_URL:-}}" PUDDLE_TOKEN="${PUDDLE_TOKEN:-${JOULE_TOKEN:-}}"
+PUDDLE_ONLY="${PUDDLE_ONLY:-${JOULE_ONLY:-}}" PUDDLE_NO_BROWSER="${PUDDLE_NO_BROWSER:-${JOULE_NO_BROWSER:-}}"
+if [ -z "$PUDDLE_DIR" ]; then
+  if [ -d "$HOME/.puddle" ] || [ ! -d "$HOME/.joule" ]; then PUDDLE_DIR="$HOME/.puddle"; else PUDDLE_DIR="$HOME/.joule"; fi
+fi
+DEFAULT_URL="$(head -1 "$(dirname "$0")/../../companion/SERVICE" 2>/dev/null || true)"
+PUDDLE_URL="${PUDDLE_URL:-$(cat "$PUDDLE_DIR/url" 2>/dev/null || printf '%s' "$DEFAULT_URL")}"
+CLAUDE_SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CODEX_CONFIG="$CODEX_HOME/config.toml"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+BEGIN='# >>> puddle (managed by Puddle; remove with `puddle off`) >>>'
+END='# <<< puddle <<<'
+OLD_BEGIN='# >>> joule (managed by `joule`; remove with `joule off`) >>>'
+OLD_END='# <<< joule <<<'
+KEYS='["PUDDLE","JOULE","CLAUDE_CODE_ENABLE_TELEMETRY","OTEL_LOGS_EXPORTER","OTEL_METRICS_EXPORTER","OTEL_EXPORTER_OTLP_PROTOCOL","OTEL_EXPORTER_OTLP_ENDPOINT","OTEL_EXPORTER_OTLP_HEADERS","OTEL_METRIC_EXPORT_INTERVAL","OTEL_LOGS_EXPORT_INTERVAL","OTEL_METRICS_INCLUDE_VERSION","OTEL_METRICS_INCLUDE_REPOSITORY","OTEL_LOG_USER_PROMPTS","OTEL_LOG_ASSISTANT_RESPONSES","OTEL_RESOURCE_ATTRIBUTES"]'
+
+say() { printf '%s\n' "$*"; }
+claude_mark() { [ -f "$CLAUDE_SETTINGS" ] || return 0; m="$(merge get "$CLAUDE_SETTINGS" PUDDLE 2>/dev/null)"; [ -n "$m" ] || m="$(merge get "$CLAUDE_SETTINGS" JOULE 2>/dev/null)"; printf '%s' "$m"; }
+die() { printf 'puddle: %s\n' "$*" >&2; exit 1; }
+
+merge() {
+  if command -v node >/dev/null 2>&1; then node "$HERE/merge.cjs" "$@"
+  elif command -v python3 >/dev/null 2>&1 && python3 -c 'import json' >/dev/null 2>&1; then python3 "$HERE/merge.py" "$@"
+  elif command -v osascript >/dev/null 2>&1; then osascript -l JavaScript "$HERE/merge.cjs" "$@" 2>&1
+  else die "needs node, python3 or macOS to edit settings"; fi
+}
+
+post() {
+  if [ -n "${3:-}" ]; then
+    curl -fsS -m 10 -X POST -H 'content-type: application/json' -H "authorization: Bearer $3" --data "$2" "$1"
+  else
+    curl -fsS -m 10 -X POST -H 'content-type: application/json' --data "$2" "$1"
+  fi
+}
+field() { tr '\n' ' ' | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p"; }
+token() { [ -f "$PUDDLE_DIR/token" ] && cat "$PUDDLE_DIR/token"; }
+
+timezone() {
+  tz="$(readlink /etc/localtime 2>/dev/null | sed -n 's|.*zoneinfo/||p')"
+  [ -z "$tz" ] && [ -f /etc/timezone ] && tz="$(cat /etc/timezone)"
+  printf '%s' "$tz"
+}
+country() {
+  loc="$(defaults read -g AppleLocale 2>/dev/null || printf '%s' "${LANG:-}")"
+  printf '%s' "$loc" | sed -n 's/^[a-zA-Z]*_\([A-Z][A-Z]\).*/\1/p'
+}
+urlenc() { printf '%s' "$1" | sed 's|%|%25|g; s|/|%2F|g; s| |%20|g; s|,|%2C|g; s|=|%3D|g'; }
+
+login() {
+  existing="$(token || true)"
+  if [ -n "$existing" ]; then say "Already signed in."; return 0; fi
+  [ -n "$PUDDLE_URL" ] || die "this copy of Puddle has no website to sign in to (set PUDDLE_URL to use one)"
+  label="$(hostname 2>/dev/null | sed 's/\.local$//')"
+  start="$(post "$PUDDLE_URL/api/device/start" "{\"label\":\"$label\"}")" || die "can't reach Puddle at $PUDDLE_URL"
+  device="$(printf '%s' "$start" | field device_code)"
+  code="$(printf '%s' "$start" | field user_code)"
+  link="$(printf '%s' "$start" | field verification_uri_complete)"
+  say ""
+  say "  Confirm this code in your browser:  $code"
+  say "  $link"
+  say ""
+  if [ "${PUDDLE_NO_BROWSER:-}" != "1" ]; then
+    (open "$link" || xdg-open "$link" || start "$link") >/dev/null 2>&1 || true
+  fi
+  i=0
+  while [ $i -lt 300 ]; do
+    sleep 2; i=$((i + 1))
+    r="$(curl -sS -m 10 -o /dev/stdout -w '\n%{http_code}' -X POST -H 'content-type: application/json' --data "{\"device_code\":\"$device\"}" "$PUDDLE_URL/api/device/poll" 2>/dev/null)" || continue
+    status="$(printf '%s' "$r" | tail -n 1)"
+    body="$(printf '%s' "$r" | sed '$d')"
+    case "$status" in
+      200)
+        t="$(printf '%s' "$body" | field token)"
+        [ -n "$t" ] || die "unexpected answer from Puddle"
+        mkdir -p "$PUDDLE_DIR" && chmod 700 "$PUDDLE_DIR"
+        (umask 077; printf '%s' "$t" > "$PUDDLE_DIR/token")
+        printf '%s' "$PUDDLE_URL" > "$PUDDLE_DIR/url"
+        say "Signed in as $(printf '%s' "$body" | field email)."
+        return 0 ;;
+      202) ;;
+      *) die "the code expired or was cancelled — run \`puddle setup\` again" ;;
+    esac
+  done
+  die "timed out waiting for the browser"
+}
+
+claude_on() {
+  t="$1"
+  attrs="user.timezone=$(urlenc "$(timezone)"),user.country=$(country)"
+  env="{\"PUDDLE\":\"puddle:$PUDDLE_URL\",\"CLAUDE_CODE_ENABLE_TELEMETRY\":\"1\",\"OTEL_LOGS_EXPORTER\":\"otlp\",\"OTEL_METRICS_EXPORTER\":\"otlp\",\"OTEL_EXPORTER_OTLP_PROTOCOL\":\"http/json\",\"OTEL_EXPORTER_OTLP_ENDPOINT\":\"$PUDDLE_URL\",\"OTEL_EXPORTER_OTLP_HEADERS\":\"Authorization=Bearer $t\",\"OTEL_METRIC_EXPORT_INTERVAL\":\"10000\",\"OTEL_LOGS_EXPORT_INTERVAL\":\"5000\",\"OTEL_METRICS_INCLUDE_VERSION\":\"true\",\"OTEL_METRICS_INCLUDE_REPOSITORY\":\"1\",\"OTEL_LOG_USER_PROMPTS\":\"0\",\"OTEL_LOG_ASSISTANT_RESPONSES\":\"0\",\"OTEL_RESOURCE_ATTRIBUTES\":\"$attrs\"}"
+  mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+  out="$(merge on "$CLAUDE_SETTINGS" "$PUDDLE_DIR/claude-settings.backup" "$env")"
+  case "$out" in
+    *PUDDLE3:*) say "  Claude Code: skipped — it already sends usage to ${out#*PUDDLE3:}. Turn that off first, then run \`puddle setup\` again."; return 1 ;;
+  esac
+  statusline_on
+  say "  Claude Code: connected (restart it to start sharing)."
+}
+claude_off() {
+  [ -f "$CLAUDE_SETTINGS" ] || return 0
+  grep -qE '"(PUDDLE|JOULE)"|/\.(puddle|joule)(-dev)?/statusline' "$CLAUDE_SETTINGS" || return 0
+  statusline_off
+  merge off "$CLAUDE_SETTINGS" "$PUDDLE_DIR/claude-settings.backup" "$KEYS" >/dev/null && say "  Claude Code: disconnected."
+}
+
+statusline_on() {
+  node_bin="$(command -v node 2>/dev/null)" || return 0
+  w="$PUDDLE_DIR/statusline.sh"
+  mkdir -p "$PUDDLE_DIR"
+  {
+    printf '#!/bin/sh\n'
+    printf "# Puddle's Claude Code status line (written by Puddle; signing out of Puddle puts yours back).\n"
+    printf 'N="%s"; S="%s"\n' "$node_bin" "$HERE/statusline.cjs"
+    printf 'export PUDDLE_DIR="%s"\n' "$PUDDLE_DIR"
+    printf 'if [ -x "$N" ] && [ -f "$S" ]; then exec "$N" "$S"; fi\n'
+    printf "# Puddle isn't here any more: your own status line, or nothing\n"
+    printf 'if [ -f "$PUDDLE_DIR/statusline-prev.sh" ]; then exec /bin/sh "$PUDDLE_DIR/statusline-prev.sh"; fi\n'
+    printf 'cat >/dev/null\n'
+  } > "$w"
+  chmod 755 "$w"
+  merge statusline-on "$CLAUDE_SETTINGS" "$w" "$PUDDLE_DIR/statusline-prev" >/dev/null 2>&1 || true
+}
+statusline_off() {
+  merge statusline-off "$CLAUDE_SETTINGS" "$PUDDLE_DIR/statusline.sh" "$PUDDLE_DIR/statusline-prev" >/dev/null 2>&1 || true
+  rm -f "$PUDDLE_DIR/statusline.sh"
+}
+
+codex_strip() {
+  [ -f "$CODEX_CONFIG" ] || return 0
+  awk -v b="$BEGIN" -v e="$END" -v ob="$OLD_BEGIN" -v oe="$OLD_END" '$0==b||$0==ob{skip=1;next} $0==e||$0==oe{skip=0;next} !skip' "$CODEX_CONFIG" > "$CODEX_CONFIG.puddle-tmp" && mv "$CODEX_CONFIG.puddle-tmp" "$CODEX_CONFIG"
+}
+codex_on() {
+  t="$1"
+  mkdir -p "$CODEX_HOME"
+  [ -f "$CODEX_CONFIG" ] || : > "$CODEX_CONFIG"
+  if grep -qF "$BEGIN" "$CODEX_CONFIG" || grep -qF "$OLD_BEGIN" "$CODEX_CONFIG"; then
+    codex_strip
+  else
+    if grep -Eq '^[[:space:]]*\[otel\]|^[[:space:]]*otel[[:space:]]*=' "$CODEX_CONFIG"; then
+      say "  Codex: skipped — config.toml already has an [otel] section. Remove it first, then run \`puddle setup\` again."; return 1
+    fi
+    cp "$CODEX_CONFIG" "$PUDDLE_DIR/codex-config.backup"
+  fi
+  {
+    [ -s "$CODEX_CONFIG" ] && [ "$(tail -c 1 "$CODEX_CONFIG" | od -An -c | tr -d ' ')" != '\n' ] && printf '\n'
+    printf '%s\n' "$BEGIN"
+    printf '[otel]\n'
+    printf 'exporter = { otlp-http = { endpoint = "%s/v1/logs", protocol = "json", headers = { "authorization" = "Bearer %s" } } }\n' "$PUDDLE_URL" "$t"
+    printf 'log_user_prompt = false\n'
+    printf '%s\n' "$END"
+  } >> "$CODEX_CONFIG"
+  say "  Codex: connected (restart Codex to start sharing)."
+}
+codex_off() {
+  [ -f "$CODEX_CONFIG" ] || return 0
+  grep -qF "$BEGIN" "$CODEX_CONFIG" || grep -qF "$OLD_BEGIN" "$CODEX_CONFIG" || return 0
+  codex_strip
+  if [ -f "$PUDDLE_DIR/codex-config.backup" ]; then
+    if cmp -s "$CODEX_CONFIG" "$PUDDLE_DIR/codex-config.backup" || [ "$(cat "$CODEX_CONFIG")" = "$(cat "$PUDDLE_DIR/codex-config.backup")" ]; then
+      cp "$PUDDLE_DIR/codex-config.backup" "$CODEX_CONFIG"
+    fi
+    rm -f "$PUDDLE_DIR/codex-config.backup"
+  fi
+  say "  Codex: disconnected."
+}
+
+cmd_setup() {
+  command -v curl >/dev/null 2>&1 || die "needs curl"
+  say "Puddle shares how you use Claude Code and Codex — counts, token totals, tool names,"
+  say "timings, prompt lengths and repo names — with your own Puddle dashboard."
+  say "It never shares your prompts, the agent's answers, code, commands or file paths."
+  login
+  t="$(token)"
+  done_any=0
+  if [ "${PUDDLE_ONLY:-}" != "codex" ] && { [ -d "$(dirname "$CLAUDE_SETTINGS")" ] || command -v claude >/dev/null 2>&1; }; then claude_on "$t" && done_any=1; fi
+  if [ "${PUDDLE_ONLY:-}" != "claude" ] && { [ -d "$CODEX_HOME" ] || command -v codex >/dev/null 2>&1; }; then codex_on "$t" && done_any=1; fi
+  [ "$done_any" = 1 ] || say "  Nothing was changed."
+  say ""
+  say "Your dashboard: $PUDDLE_URL"
+  say "Restart Claude Code / Codex (quit and reopen the apps) to start sharing."
+}
+cmd_connect() {
+  [ -n "${PUDDLE_TOKEN:-}" ] || die "connect needs PUDDLE_TOKEN (the Puddle app passes it)"
+  case "$PUDDLE_TOKEN" in jl_*) ;; *) die "that doesn't look like a Puddle device key" ;; esac
+  mkdir -p "$PUDDLE_DIR" && chmod 700 "$PUDDLE_DIR"
+  ( umask 077; printf '%s' "$PUDDLE_TOKEN" > "$PUDDLE_DIR/token"; printf '%s' "$PUDDLE_URL" > "$PUDDLE_DIR/url" )
+  done_any=0
+  if [ "${PUDDLE_ONLY:-}" != "codex" ] && { [ -d "$(dirname "$CLAUDE_SETTINGS")" ] || command -v claude >/dev/null 2>&1; }; then claude_on "$PUDDLE_TOKEN" && done_any=1; fi
+  if [ "${PUDDLE_ONLY:-}" != "claude" ] && { [ -d "$CODEX_HOME" ] || command -v codex >/dev/null 2>&1; }; then codex_on "$PUDDLE_TOKEN" && done_any=1; fi
+  [ "$done_any" = 1 ] || say "  Nothing was changed."
+}
+cmd_status() {
+  if [ -n "$(token || true)" ]; then say "Signed in · $(cat "$PUDDLE_DIR/url" 2>/dev/null || printf '%s' "$PUDDLE_URL")"; else say "Not signed in"; fi
+  case "$(claude_mark)" in puddle:*|joule:*) say "Claude Code: connected" ;; *) say "Claude Code: not connected" ;; esac
+  if [ -f "$CODEX_CONFIG" ] && { grep -qF "$BEGIN" "$CODEX_CONFIG" || grep -qF "$OLD_BEGIN" "$CODEX_CONFIG"; }; then say "Codex: connected"; else say "Codex: not connected"; fi
+}
+cmd_off() {
+  claude_off
+  codex_off
+  t="$(token 2>/dev/null || true)"
+  [ -n "$t" ] && post "$(cat "$PUDDLE_DIR/url" 2>/dev/null || printf '%s' "$PUDDLE_URL")/api/token/revoke" '{}' "$t" >/dev/null 2>&1 || true
+  rm -f "$PUDDLE_DIR/token" "$PUDDLE_DIR/url"
+  say "Disconnected. Restart Claude Code / Codex for it to take effect. Your data stays on your dashboard until you delete it there."
+}
+cmd_hook() {
+  agent="${1:-claude-code}"
+  t="$(token 2>/dev/null || true)"; [ -n "$t" ] || exit 0
+  input="$(cat)"
+  sid="$(printf '%s' "$input" | field session_id)"
+  cwd="$(printf '%s' "$input" | field cwd)"
+  src="$(printf '%s' "$input" | field source)"
+  [ -n "$sid" ] || exit 0
+  repo="$(git -C "$cwd" remote get-url origin 2>/dev/null | sed -E 's#//[^@/]*@#//#; s#\.git$##' || true)"
+  folder="$(basename "$cwd" 2>/dev/null || true)"
+  esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+  account=""
+  cfg="${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/.claude.json}"; [ -f "${cfg:-}" ] || cfg="$HOME/.claude.json"
+  if [ "$agent" = claude-code ] && [ -f "$cfg" ]; then
+    org="$(field organizationUuid < "$cfg" | head -1)"
+    if [ -n "$org" ]; then
+      fp="$(printf 'joule|%s' "$org" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16)"
+      type="$(field organizationType < "$cfg" | head -1)"
+      name=""; case "$type" in *team*|*enterprise*) name="$(field organizationName < "$cfg" | head -1)" ;; esac
+      account=",\"account\":{\"org_hash\":\"$fp\",\"type\":\"$(esc "$type")\",\"name\":\"$(esc "$name")\"}"
+    fi
+  fi
+  post "$(cat "$PUDDLE_DIR/url" 2>/dev/null || printf '%s' "$PUDDLE_URL")/api/session-context" \
+    "{\"session_id\":\"$(esc "$sid")\",\"agent\":\"$agent\",\"repo\":\"$(esc "$repo")\",\"folder\":\"$(esc "$folder")\",\"source\":\"$(esc "$src")\"$account}" "$t" >/dev/null 2>&1 || true
+  exit 0
+}
+
+case "${1:-setup}" in
+  connect) shift; cmd_connect "$@" ;;
+  setup|on) cmd_setup ;;
+  status) cmd_status ;;
+  off|leave) cmd_off ;;
+  hook) shift; cmd_hook "$@" ;;
+  statusline) if [ -n "$(token || true)" ] && [ -f "$CLAUDE_SETTINGS" ]; then case "$(claude_mark)" in puddle:*|joule:*) statusline_on ;; esac; fi ;;
+  *) say "usage: puddle setup | status | off" ;;
+esac

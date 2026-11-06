@@ -1,11 +1,7 @@
-// Normalizes OTLP/HTTP JSON payloads from Claude Code into flat rows.
-// Pure functions only — no I/O — so they can be unit tested with fixtures.
-
 import { createHash } from 'node:crypto';
 import { fromCodex, isCodexEvent } from './codex.js';
 import { agent as agentOf } from './agents.js';
 
-// OTLP AnyValue -> JS value
 export function anyValue(v) {
   if (v == null) return null;
   if ('stringValue' in v) return v.stringValue;
@@ -41,12 +37,9 @@ const bool = (x) => {
 
 const nanosToMs = (ns) => {
   if (ns == null || ns === '' || ns === '0' || ns === 0) return null;
-  // nanos exceed 2^53; BigInt keeps the millisecond part exact
   try { return Number(BigInt(ns) / 1000000n); } catch { return null; }
 };
 
-// Who produced this data. account_uuid is stable across machines; email is
-// what humans read; user.id is an anonymous per-install fallback.
 export function identityOf(a) {
   const account_uuid = a['user.account_uuid'] || a['user.account_id'] || null;
   const email = a['user.email'] || null;
@@ -75,8 +68,6 @@ export function sessionOf(a) {
 
 const stripPrefix = (n) => (n ? String(n).replace(/^claude_code\./, '') : n);
 
-// ---- Logs (events) -------------------------------------------------------
-
 export function parseLogs(body) {
   const out = [];
   for (const rl of body?.resourceLogs || []) {
@@ -85,11 +76,9 @@ export function parseLogs(body) {
       for (const rec of sl.logRecords || []) {
         let a = { ...res, ...attrsToObj(rec.attributes) };
         const bodyVal = anyValue(rec.body);
-        // an event names itself (event.name) or its body is one (claude_code.x, codex.x); any other log line (Codex's
-        // "flushing OTEL metrics", 21 Oct 2026) is not an event: counted, never stored
         let name = a['event.name'] || (typeof bodyVal === 'string' && /^(claude_code|codex)\.[a-z_]+$/.test(bodyVal) ? bodyVal : null);
         if (!name) { out.ignored = (out.ignored || 0) + 1; continue; }
-        if (isCodexEvent(name)) { // Codex: translate to the same rows (see codex.js)
+        if (isCodexEvent(name)) {
           const m = fromCodex(name, a);
           if (!m) continue;
           [name, a] = m;
@@ -109,12 +98,9 @@ export function parseLogs(body) {
 }
 
 export const TEXT_KEYS = ['prompt', 'prompt_text', 'response', 'response_text', 'body', 'request_body', 'response_body'];
-// Team privacy: tool names, counts, success and timing are kept; what was run
-// or opened (commands, file paths, inputs, outputs, error text) is never stored.
 export const TOOL_DETAIL_KEYS = ['tool_parameters', 'tool_input', 'tool_output', 'tool_result', 'full_command', 'bash_command', 'file_path', 'error', 'arguments', 'output'];
 const TOOL_EVENTS = new Set(['tool_result', 'tool_decision', 'codex.tool_result', 'codex.tool_decision']);
 
-// Removes text content from a raw OTLP payload before it is archived.
 export function scrubPayload(body) {
   for (const rl of body?.resourceLogs || []) {
     for (const sl of rl.scopeLogs || []) {
@@ -141,16 +127,12 @@ export function dedupeKey(name, a) {
 export function eventRow(name, ts, a) {
   const id = identityOf(a);
   const s = sessionOf(a);
-  // Never keep prompt or response text, even if someone turns on
-  // OTEL_LOG_USER_PROMPTS / OTEL_LOG_ASSISTANT_RESPONSES. Lengths are kept.
   const attrs = { ...a };
   for (const k of TEXT_KEYS) delete attrs[k];
   if (TOOL_EVENTS.has(name)) for (const k of TOOL_DETAIL_KEYS) delete attrs[k];
   const rawPrompt = [a.prompt, a.prompt_text].find((v) => typeof v === 'string' && v !== '<REDACTED>');
   const promptLen = num(a.prompt_length) ?? (rawPrompt ? rawPrompt.length : null);
   const seq = a['event.sequence'] ?? null;
-  // Stable keys shared with session-log recovery (backfill.js), so the same
-  // request / tool call / prompt can never be stored twice.
   const dedupe = dedupeKey(name, a) || createHash('sha1')
     .update([s.session_id, seq, name, ts, a.prompt_id ?? a['prompt.id'] ?? '', a.tool_use_id ?? ''].join('|'))
     .digest('hex');
@@ -173,12 +155,10 @@ export function eventRow(name, ts, a) {
     prompt_length: promptLen,
     decision: a.decision || null,
     error: TOOL_EVENTS.has(name) ? (a.error_type || null) : a.error || null,
-    agent: a.agent && !agentOf(a.agent).unknown ? agentOf(a.agent).id : 'claude-code', // Claude Code's own events carry none
+    agent: a.agent && !agentOf(a.agent).unknown ? agentOf(a.agent).id : 'claude-code',
     attrs,
   };
 }
-
-// ---- Metrics -------------------------------------------------------------
 
 const DELTA = 1;
 const CUMULATIVE = 2;
@@ -194,7 +174,7 @@ export function parseMetrics(body) {
     for (const sm of rm.scopeMetrics || rm.instrumentationLibraryMetrics || []) {
       for (const m of sm.metrics || []) {
         const data = m.sum || m.gauge;
-        if (!data) continue; // histograms aren't emitted by Claude Code
+        if (!data) continue;
         const temp = m.sum ? temporality(data.aggregationTemporality) : DELTA;
         for (const dp of data.dataPoints || []) {
           const a = { ...res, ...attrsToObj(dp.attributes) };
@@ -222,8 +202,6 @@ export function parseMetrics(body) {
   return out;
 }
 
-// Turn a cumulative reading into a delta given the last stored state.
-// A new start time or a drop in value means the counter was reset.
 export function cumulativeDelta(prev, point) {
   if (!point.cumulative) return point.value;
   if (!prev) return point.value;

@@ -33,3 +33,6 @@ companion-app/target-dev/
 companion/SERVICE
 # the logo files as they were handed over (the same files, renamed, are assets/logo/*.svg)
 assets/logo/Logo - *
+
+# Python bytecode
+__pycache__/

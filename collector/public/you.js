@@ -1,15 +1,9 @@
-// One person, deep: today vs your usual, this week with its forecast, your rhythm, your habits.
-// Renders the shape collector/forecast.js rhythm() returns. Used by Me (on your Mac, full history)
-// and by the public "You" page (the service's copy, since you connected). Counts only, never names.
-
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const hm = (min) => { min = Math.max(0, Math.round(min || 0)); return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`; };
 const WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const WD1 = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const hh = (h) => `${String(h).padStart(2, '0')}:00`;
 
-// The team dashboard's pieces, so Me, You and the popover look like the team page:
-// the headline tiles (label, value, a spark underneath) and its spark line.
 export function spark(values, color) {
   const v = values.length ? values : [0];
   const max = Math.max(...v, 1e-9);
@@ -20,7 +14,6 @@ export function spark(values, color) {
     <path d="${line}L100,30L0,30Z" fill="${color}" opacity="0.14"/>
     <path d="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
 }
-// tiles: [{ label, value, unit?, spark?, tip? }]
 export const kpiTiles = (tiles) => tiles.map((t) => `<div class="kpi"${t.tip ? ` title="${esc(t.tip)}"` : ''}><div class="k"><span>${esc(t.label)}</span></div><div class="v${String(t.value).length > 8 ? ' long' : ''}"><span class="val">${esc(t.value)}</span>${t.unit ? `<small class="unit">${esc(t.unit)}</small>` : ''}</div><div class="sp">${t.spark || ''}</div></div>`).join('');
 
 function youTiles(d) {
@@ -35,8 +28,6 @@ function youTiles(d) {
   ]);
 }
 
-// Today at a glance: how long so far, against your usual day up to this hour, and hour by hour
-// (grey = your usual hour, orange = today; the line marks now). No explaining needed.
 export function todayCard(t, { typical = null, nowHour = null } = {}) {
   let pill = '';
   if (typical && typical.some((m) => m > 0) && nowHour != null) {
@@ -53,7 +44,6 @@ export function todayCard(t, { typical = null, nowHour = null } = {}) {
   </section>`;
 }
 
-// hour by hour: the usual hour (grey, wide) behind today's (orange, narrow); hours still ahead are faint
 export function dayChart(el, typical, today, nowHour) {
   const W = 600, H = 110, slot = W / 24, max = Math.max(1, ...typical, ...today), x = (h) => h * slot, y = (m) => H - (m / max) * (H - 18);
   const bars = Array.from({ length: 24 }, (_, h) => {
@@ -83,8 +73,6 @@ export function weekCard(w) {
   </section>`;
 }
 
-// Tokens per day (calendar.js, loaded as a plain script by every page that shows it): the card, then
-// mountTokens(el, d) once it's in the page. The last 90 days; hover a day for its numbers.
 export const tokensCard = () => `<section class="card you-cal"><header><h2>Tokens per day</h2></header><div class="cal you-cal-g"></div></section>`;
 export function mountTokens(el, d) {
   const g = el.querySelector('.you-cal-g'); if (!g || !globalThis.mountCalendar) return;
@@ -101,7 +89,6 @@ export function habitsCard(r) {
   </section>`;
 }
 
-// data: rhythm() output; streak: { current, best } (optional)
 export function renderYou(el, data, { streak = data.streak } = {}) {
   el.innerHTML = `<section class="kpis headline" aria-label="You at a glance">${youTiles({ ...data, streak })}</section>`
     + todayCard(data.today, { typical: data.typicalDay, nowHour: ((data.now + data.tz * 60_000) % 864e5) / 36e5 }) + weekCard(data.week) + habitsCard(data) + tokensCard();

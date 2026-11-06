@@ -1,25 +1,16 @@
-// Measures "Needs a look" precision on synthetic teams: every demo persona has
-// known, planted problems; any other flag is a false alarm.
-//   node scripts/flag-eval.js [seeds=5]
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeDemo } from '../collector/demo.js';
 
-// Yuki's broken connector also shows as general failures before it has 6 calls.
 export const PLANTED = {
   'Sofia Rossi': ['quiet'], 'Jonas Weber': ['failures', 'stuck'], 'Amara Okafor': ['context'], 'Noah Brooks': ['ratelimit', 'limit'],
   'Yuki Tanaka': ['broken', 'failures'], 'Priya Nair': ['hook'], 'Tom Becker': ['friction'], 'Mateo García': ['version'],
   'Lena Fischer': [], 'Ava Martin': [],
 };
-// What must be found (recall): one flag per planted problem.
 const REQUIRED = { ...PLANTED, 'Yuki Tanaka': ['broken'] };
 
-// The evaluation runs on fixed moments of a reference week, never on the wall clock: the demo
-// team's history depends on the hour of the week (people's work hours, time zones), so a
-// clock-based run gave different answers at different times (a sweep over 168 hours showed
-// planted problems out of view at some hours). Spread over the week; same answer on every run.
 export const MOMENTS = ['2026-10-12T09:00:00Z', '2026-10-14T13:00:00Z', '2026-10-16T17:00:00Z'].map(Date.parse);
 
 export async function evaluate(seeds = 5, ranges = [1, 7, 30], moments = MOMENTS) {
@@ -37,7 +28,6 @@ export async function evaluate(seeds = 5, ranges = [1, 7, 30], moments = MOMENTS
           for (const f of p.flags) {
             if (want.includes(f.kind)) tp++; else { fp++; falseAlarms.push(`seed ${seed} · ${new Date(now).toISOString().slice(0, 13)}h · ${days}d · ${p.name}: ${f.text}`); }
           }
-          // recall: planted problems seen in the 7-day view
           if (days === 7) {
             const need = REQUIRED[p.name] || []; expected += need.length;
             for (const k of need) if (p.flags.some((f) => f.kind === k)) found++; else missed.push(`seed ${seed} · ${new Date(now).toISOString().slice(0, 13)}h · ${p.name}: ${k}`);

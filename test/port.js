@@ -1,7 +1,3 @@
-// A port (or a run of ports) free right now, for a test server. Test files run side by side, so fixed ranges picked at
-// random collided now and then (two files in 47000-47899 at once); here every port of the span is checked free first.
-//   const PORT = await freePort();        // one server
-//   const PORT = await freePort(502);     // a service at PORT and Puddle's helper at PORT + 500 (and + 501, its Me)
 import net from 'node:net';
 
 const free = (port) => new Promise((ok) => {

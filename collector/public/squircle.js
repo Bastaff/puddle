@@ -1,15 +1,9 @@
-// Squircles where the browser can't draw them (Safari, and so Puddle's own window): the big surfaces (cards, tiles,
-// panels, menus, dialogs) get their background drawn as a smooth-cornered shape behind their content, the way iOS
-// rounds corners (the curve starts before the corner and eases into it), and a shadow that follows the shape. Their
-// content isn't clipped and their colours stay the stylesheet's: they're read again when the theme or a class
-// changes. Where corner-shape works (Chrome), the stylesheet draws them itself (tokens.css) and this does nothing.
 (() => {
   if (!window.CSS || CSS.supports('corner-shape', 'squircle') || typeof ResizeObserver === 'undefined') return;
   const SEL = '.card, .kpi, .lay-tray, .sheet, .menu, .pick, .pcard, .p-today, .srow';
-  const SMOOTH = 0.6; // how far the curve reaches along each edge (0 = a round corner, 1 = the longest ease)
+  const SMOOTH = 0.6;
   const rad = (deg) => (deg * Math.PI) / 180;
 
-  // one corner's curve: where it starts along the edge (p), the two easing curves (a, b, c, d) and the arc between
   function corner(R, budget) {
     let s = SMOOTH, p = (1 + s) * R;
     if (p > budget) { s = Math.max(0, budget / R - 1); p = Math.min(p, budget); }
@@ -29,15 +23,12 @@
       `L${n(p)} ${h}`, `c${n(-a)} 0 ${n(-(a + b))} 0 ${-e} ${n(-d)}`, `a${n(R)} ${n(R)} 0 0 1 ${n(-L)} ${n(-L)}`, `c${n(-d)} ${n(-c)} ${n(-d)} ${n(-(b + c))} ${n(-d)} ${-e}`,
       `L0 ${n(p)}`, `c0 ${n(-a)} 0 ${n(-(a + b))} ${n(d)} ${-e}`, `a${n(R)} ${n(R)} 0 0 1 ${n(L)} ${n(-L)}`, `c${n(c)} ${n(-d)} ${n(b + c)} ${n(-d)} ${e} ${n(-d)}`, 'Z'].join('');
   }
-  // "rgba(…) 0px 4px 16px 0px, …" → drop-shadow(0px 4px 16px rgba(…)) …: the same shadows, following the shape
   const shadows = (box) => (!box || box === 'none' ? '' : box.split(/,(?![^(]*\))/).filter((x) => !/inset/.test(x)).map((x) => {
     const color = (x.match(/rgba?\([^)]*\)|#[0-9a-f]+/i) || ['rgba(0,0,0,.1)'])[0], len = x.replace(color, '').trim().split(/\s+/).slice(0, 3);
     return `drop-shadow(${len.join(' ')} ${color})`;
   }).join(' '));
 
   const drawn = new WeakMap();
-  // paints wait for the next frame and go together: every reset first, then every read, then every write, so the
-  // browser lays the page out once per frame instead of once per surface
   let queue = new Set(), frame = 0;
   const paint = (el) => { queue.add(el); frame ||= requestAnimationFrame(flush); };
   function flush() {
@@ -46,7 +37,6 @@
     const reads = list.map((el) => { const cs = getComputedStyle(el); return { el, w: el.offsetWidth, h: el.offsetHeight, r: parseFloat(cs.borderTopLeftRadius) || 0,
       pctR: cs.borderTopLeftRadius.includes('%'), img: cs.backgroundImage, bg: cs.backgroundColor, box: cs.boxShadow }; });
     for (const { el, w, h, r, pctR, img, bg, box } of reads) {
-      // only a plain colour on a box with a size (a skeleton's shimmer, the demo stripes and hidden menus stay as they are)
       if (!w || !h || r < 8 || img !== 'none' || bg === 'rgba(0, 0, 0, 0)' || pctR) { drawn.delete(el); continue; }
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><path d="${path(w, h, r)}" fill="${bg}"/></svg>`;
       Object.assign(el.style, { backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(svg)}")`, backgroundColor: 'transparent', backgroundSize: '100% 100%',
@@ -55,19 +45,16 @@
     }
   }
 
-  // drawn again when a surface changes size, gets another class (skeleton → card, dragging), or the theme changes
   const sizes = new ResizeObserver((es) => { for (const e of es) { const el = e.target, b = e.borderBoxSize?.[0]; const key = b ? `${Math.round(b.inlineSize)}x${Math.round(b.blockSize)}` : null; if (!key || drawn.get(el) !== key) paint(el); } });
   const classes = new MutationObserver((ms) => { for (const m of ms) paint(m.target); });
   const seen = new WeakSet();
   const watch = (el) => { if (seen.has(el)) return; seen.add(el); sizes.observe(el); classes.observe(el, { attributes: true, attributeFilter: ['class', 'hidden'] });
-    el.addEventListener('pointerenter', () => paint(el)); el.addEventListener('pointerleave', () => paint(el)); // a :hover colour
+    el.addEventListener('pointerenter', () => paint(el)); el.addEventListener('pointerleave', () => paint(el));
     paint(el); };
   const scan = (root) => { if (root.matches?.(SEL)) watch(root); for (const el of root.querySelectorAll?.(SEL) || []) watch(el); };
-  // a surface that leaves the page is no longer watched (pages that rebuild their cards would otherwise keep every old one)
   const drop = (root) => { const list = root.matches?.(SEL) ? [root] : []; for (const el of root.querySelectorAll?.(SEL) || []) list.push(el);
     for (const el of list) if (seen.has(el) && !el.isConnected) { sizes.unobserve(el); seen.delete(el); queue.delete(el); } };
   const all = () => { for (const el of document.querySelectorAll(SEL)) paint(el); };
-  // pages build their cards as data arrives (and the person page rebuilds them): new surfaces are found as they appear
   new MutationObserver((ms) => { for (const m of ms) { for (const n of m.removedNodes) if (n.nodeType === 1) drop(n); for (const n of m.addedNodes) if (n.nodeType === 1) scan(n); } }).observe(document.documentElement, { childList: true, subtree: true });
   new MutationObserver(all).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', all);

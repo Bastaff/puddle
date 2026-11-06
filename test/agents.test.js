@@ -1,7 +1,3 @@
-// Every agent adapter keeps the same promises (docs/agents.md): it finds the agent's homes, its sessions come in the
-// shared shape with an id, a client and a title source, its plan readings are the shared shape, never a word anyone
-// typed leaves the adapter, and the catalogue knows the agent and every client it reports. A new agent passes this
-// test with its own fixture below, and the board, sharing, alarms and the setup report work without other changes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -15,7 +11,6 @@ const SECRET = 'please refactor the payment module secretly';
 const NOW = Date.now(), T = (m) => new Date(NOW - m * 60_000).toISOString();
 const write = (f, lines) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, lines.map((l) => JSON.stringify(l)).join('\n') + '\n'); };
 
-// one Mac's files per agent: a session with a secret prompt, a title, and a plan reading where the agent keeps one
 const FIXTURES = {
   'claude-code': (home) => {
     fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { organizationUuid: 'org-1', organizationType: 'claude_team', organizationName: 'Acme' } }));
@@ -87,7 +82,6 @@ for (const a of ADAPTERS) {
         assert.ok(Agents.planAgents.includes(p.agent), `plan readings carry a known agent id (${p.agent})`);
         assert.ok(['five_pct', 'week_pct', 'month_pct'].some((k) => p[k] != null) && p.ts, 'a plan reading');
       }
-      // what leaves the scan: nothing anyone typed
       const out = JSON.stringify(scan({ home, env, now: NOW }));
       assert.ok(!out.includes(SECRET), 'no prompt text in the scan');
     } finally { fs.rmSync(home, { recursive: true, force: true }); }

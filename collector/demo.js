@@ -1,7 +1,3 @@
-// Demo team: a separate database (demo.db) filled with synthetic people, plus a
-// live simulator, so the dashboard can be seen with a whole team working.
-// Never reads or writes the real usage database.
-
 import fs from 'node:fs';
 import { openDb } from './db.js';
 import { makeQueries } from './queries.js';
@@ -12,7 +8,6 @@ const DAY = 86400_000;
 const HISTORY_DAYS = 35;
 const OPUS = 'claude-opus-5-5', SONNET = 'claude-sonnet-5-5', HAIKU = 'claude-haiku-5-5';
 
-// Each person has a recognisable way of working, so the views have something to show.
 export const DEMO_PEOPLE = [
   { name: 'Lena Fischer', plan: [34, 52], country: 'DE', tz: 'Europe/Berlin', hours: [9, 18], perDay: 26, holidays: [8, 9], steps: 5, len: 420, fail: 0.03, asks: 0.04, mention: 0.25, trend: 'steady',
     mix: { read: 30, edit: 40, run: 18, web: 3, agent: 5, mcp: 2, other: 2 }, models: { [OPUS]: 0.8, [SONNET]: 0.15, [HAIKU]: 0.05 }, effort: { high: 0.6, medium: 0.4 },
@@ -41,7 +36,6 @@ export const DEMO_PEOPLE = [
   { name: 'Noah Brooks', plan: [96, 83], country: 'US', tz: 'America/New_York', hours: [9, 18], perDay: 22, steps: 5, len: 200, fail: 0.05, asks: 0.05, mention: 0.1, trend: 'spike', rateLimited: true,
     mix: { read: 30, edit: 30, run: 25, web: 5, agent: 5, mcp: 0, other: 5 }, models: { [HAIKU]: 0.5, [SONNET]: 0.5 }, effort: { low: 0.7, medium: 0.3 },
     client: { cli: 1 }, skills: [], agents: ['general-purpose'], mcp: [], plugins: [] },
-  // Decoy: an occasional user. Long breaks are normal for her and must not raise a flag.
   { name: 'Ava Martin', plan: [6, 14], country: 'FR', tz: 'Europe/Paris', hours: [10, 17], perDay: 7, attendance: 0.3, steps: 4, len: 260, fail: 0.05, asks: 0.05, mention: 0.1, trend: 'steady',
     mix: { read: 35, edit: 30, run: 20, web: 10, agent: 0, mcp: 0, other: 5 }, models: { [SONNET]: 1 }, effort: { medium: 1 },
     client: { 'claude-desktop': 1 }, skills: [], agents: [], mcp: [], plugins: [] },
@@ -53,7 +47,6 @@ const TOOLS = {
 };
 const MCP_OPS = { linear: ['list_issues', 'get_issue', 'update_issue'], slack: ['search', 'post_message'], github: ['get_pull_request', 'list_commits'] };
 
-// Small seeded PRNG so a regenerated demo looks the same each time.
 function mulberry32(a) {
   return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
@@ -62,7 +55,6 @@ const one = (rnd, a) => a[Math.floor(rnd() * a.length)];
 const between = (rnd, a, b) => a + rnd() * (b - a);
 const logn = (rnd, mean, spread = 0.6) => mean * Math.exp((rnd() + rnd() + rnd() - 1.5) * spread * 1.4);
 
-// Minutes east of UTC for a time zone at a moment.
 function tzOffsetMin(tz, t) {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
     .formatToParts(new Date(t)).map((x) => [x.type, x.value]));
@@ -93,7 +85,6 @@ export function makeSim(seed = 7) {
     return { id: uid('s'), client: pick(rnd, p.client), seq: 0, ctx: between(rnd, 14000, 26000), started: false };
   }
 
-  // One prompt and everything Claude does for it. Returns rows with their times.
   function prompt(p, s, t0) {
     const ev = [], pts = [];
     const pid = uid('p');
@@ -125,7 +116,7 @@ export function makeSim(seed = 7) {
       request(pick(rnd, p.models), mcpNext ? { 'mcp_server.name': mcpNext } : {});
       mcpNext = null;
       if (s.ctx > (p.bigContext ? 260_000 : 420_000)) { push(t, 'compaction', { trigger: 'auto', pre_tokens: Math.round(s.ctx) }); s.ctx = between(rnd, 30000, 50000); }
-      if (i === steps - 1) break; // the last turn is the answer
+      if (i === steps - 1) break;
       for (let k = rnd() < 0.25 ? 2 : 1; k > 0; k--) {
         let cat = pick(rnd, p.mix);
         if (cat === 'mcp' && !p.mcp.length) cat = 'read';
@@ -141,7 +132,6 @@ export function makeSim(seed = 7) {
         let ok = rnd() > p.fail * (cat === 'run' ? 1.6 : cat === 'read' ? 0.4 : 0.8);
         if (cat === 'mcp' && mcpNext && mcpNext === p.brokenMcp) ok = rnd() > 0.7;
         if (cat === 'run' && p.loops && rnd() < p.loops) {
-          // Claude retries the same failing command several times
           for (let r = Math.round(between(rnd, 4, 7)); r > 0; r--) {
             const id = uid('tu'); t += between(rnd, 1500, 6000);
             push(t, 'tool_decision', { tool_use_id: id, tool_name: tool, decision: 'accept', source: 'config' });
@@ -169,7 +159,6 @@ export function makeSim(seed = 7) {
     return { ev, pts, end: t };
   }
 
-  // A sitting: several prompts with thinking time in between.
   function session(p, start, prompts, thinkMs, until) {
     const s = newSession(p), ev = [], pts = [];
     let t = start;
@@ -210,7 +199,6 @@ export function makeSim(seed = 7) {
     return { ev, pts };
   }
 
-  // Live: people within their working hours (at least four) keep prompting.
   const live = new Map();
   function livePeople(now) {
     const can = DEMO_PEOPLE.filter((p) => p.trend !== 'stopped');
@@ -242,20 +230,17 @@ export function makeSim(seed = 7) {
 
 const toRows = (ev) => ev.map(([ts, name, a]) => eventRow(name, ts, a));
 
-// The demo team's history as plain rows, for loading into any store (tests compare databases with it).
 export function demoHistory({ seed = 7, now = Date.now() } = {}) {
   const { ev, pts } = makeSim(seed).history(now);
   return { rows: toRows(ev), points: pts };
 }
 
-// `now` fixes the clock the history and the queries are built from (evaluations, tests);
-// the live simulator still follows real time.
 export function makeDemo(file, { notify = () => {}, log = () => {}, seed = 7, now = () => Date.now() } = {}) {
   let store = null, q = null, sim = null, timer = null, stopAt = 0, seenAt = 0;
 
   function open() {
     if (store) return;
-    store = openDb(file, { rollup: true }); // the demo is worked out in-process: it reads the summary too
+    store = openDb(file, { rollup: true });
     q = makeQueries(store.db, { now, rollup: () => true });
   }
   function regenerate() {
@@ -268,16 +253,12 @@ export function makeDemo(file, { notify = () => {}, log = () => {}, seed = 7, no
     const { ev, pts } = sim.history(now() - 60_000);
     store.insertEvents(toRows(ev));
     store.insertPoints(pts);
-    // plan limits for the Limits rings: [5-hour %, week %]. Only Noah (rate limited) is close to his limit, so
-    // nobody else gets a "Plan almost used up" flag.
     const ins = store.db.prepare(`INSERT OR REPLACE INTO plan_limits (user_key, agent, org_hash, five_pct, five_reset, week_pct, week_reset, ts) VALUES (?, 'claude-code', 'demo', ?, ?, ?, ?, ?)`);
     const t = now();
     DEMO_PEOPLE.forEach((p, i) => { const [five, week] = p.plan; ins.run(p.key, five, t + (1 + (i % 4)) * 3600_000, week, t + (1 + (i % 6)) * 864e5, t - 5 * 60_000); });
     store.db.exec('ANALYZE');
     log(`demo team generated: ${ev.length} events in ${Date.now() - t0}ms`);
   }
-  // Fresh history when first used by this process, or after nobody watched
-  // for a while (the simulator only runs while someone is looking).
   function ensure() {
     if (!sim || Date.now() - seenAt > 30 * 60_000) regenerate();
     seenAt = Date.now();
@@ -293,7 +274,6 @@ export function makeDemo(file, { notify = () => {}, log = () => {}, seed = 7, no
   }
   return {
     queries() { ensure(); return q; },
-    // Keeps simulating while someone is watching the demo.
     keepAlive() {
       ensure();
       stopAt = Date.now() + 90_000;

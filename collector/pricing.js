@@ -1,10 +1,4 @@
-// List prices (USD per million tokens) used to estimate cost for requests that come without one: Claude Code's
-// session logs (tokens, not cost) and every Codex call (Codex's telemetry and logs carry no cost at all).
-// Cache writes: 5-minute = 1.25x input, 1-hour = 2x input. Fast mode = 2x.
-// Verified against Claude Code's own telemetry cost for opus-5-5 and haiku-5-5.
-
 const PRICES = [
-  // [model id prefix, input, output, cache read]
   ['claude-fable-5-1', 10, 50, 0.25],
   ['claude-fable-5', 10, 50, 0.25],
   ['claude-mythos-5', 10, 50, 0.25],
@@ -18,8 +12,6 @@ const PRICES = [
   ['claude-sonnet-4-6', 3, 15, 0.3],
   ['claude-haiku-5-5', 0.1, 0.5, 0.01],
   ['claude-haiku-4-5', 1, 5, 0.1],
-  // OpenAI (Codex), standard tier, from developers.openai.com/api/docs/pricing (21 Oct 2026). More specific ids first
-  // (the first prefix that fits wins). Not listed there, so not priced: codex-auto-review, gpt-5-codex.
   ['gpt-6.1-sol', 2, 10, 0.1],
   ['gpt-6-astra', 10, 50, 1],
   ['gpt-6-sol', 2, 10, 0.2],
@@ -42,8 +34,6 @@ const PRICES = [
   ['o3', 2, 8, 0.5],
 ];
 
-// Priced higher for long prompts: Haiku 5.5 over 100K tokens (everything ×5); OpenAI's models with a long-context
-// price over 272K input tokens (input and cached input ×2, output ×1.5).
 const OPENAI_LONG = { over: 272_000, input: 2, output: 1.5 };
 const LONG_PROMPT = { 'claude-haiku-5-5': { over: 100_000, input: 5, output: 5 },
   ...Object.fromEntries(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-pro'].map((m) => [m, OPENAI_LONG])) };
@@ -53,7 +43,6 @@ export function priceFor(model) {
   return PRICES.find(([p]) => id === p || id.startsWith(p + '-') || id.startsWith(p + '@')) || null;
 }
 
-// usage = the Messages API usage object as written in the session log.
 export function estimateCost(model, usage) {
   const p = priceFor(model);
   if (!p || !usage) return null;
@@ -65,7 +54,6 @@ export function estimateCost(model, usage) {
   const long = LONG_PROMPT[name];
   if (long && promptTokens > long.over) { input *= long.input; read *= long.input; output *= long.output; }
   const factor = usage.speed === 'fast' ? 2 : 1;
-  // cache writes: 1.25× input for the short-lived kind (Claude's 5 minutes, OpenAI's 30 minutes), 2× for Claude's hour
   const cost =
     (usage.input_tokens || 0) * input +
     (usage.output_tokens || 0) * output +
@@ -75,11 +63,9 @@ export function estimateCost(model, usage) {
   return (cost * factor) / 1e6;
 }
 
-// Maximum context window per model (tokens), for "context used" gauges.
 export function contextWindow(model) {
   const id = String(model || '').toLowerCase();
   if (/haiku-4-5|sonnet-4-5|opus-4-5|opus-4-1|opus-4-0|sonnet-4-0|3-/.test(id) && !id.includes('[1m]')) return 200_000;
-  // Codex's models (gpt-*, o*): what Codex reports as model_context_window (its logs say so per call when known)
   if (/^(gpt|o\d|codex)/.test(id)) return 258_400;
   return 1_000_000;
 }

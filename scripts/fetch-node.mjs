@@ -1,7 +1,3 @@
-// The Node.js the app carries inside it (companion-app/binaries/node-aarch64-apple-darwin, not in git): this exact
-// official release, from nodejs.org, checked against Node's own published checksums. `npm run dev:app` runs this when
-// the binary is missing; run it by hand to change the version (and then update NODE here).
-//   node scripts/fetch-node.mjs [--force]
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';

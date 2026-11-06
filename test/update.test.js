@@ -1,8 +1,10 @@
-// Updates: an update is offered only when the published version differs from the running one,
-// and only a Puddle.app (never a repo checkout or a copy run from Downloads) installs itself.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeUpdater, appBundle, placeFor } from '../companion/update.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { makeUpdater, appBundle, placeFor, signedByTeam, TEAM, TEAM_REQUIREMENT } from '../companion/update.js';
 
 const published = (version, built = null) => async (url) => {
   assert.match(url, /\/api\/app\/latest$/);
@@ -43,4 +45,16 @@ test('only a real, settled Puddle.app counts as installable', () => {
   assert.equal(appBundle('/Applications/Puddle.app/Contents/MacOS/node'), '/Applications/Puddle.app');
   assert.equal(appBundle('/private/var/folders/x/AppTranslocation/ABC/d/Puddle.app/Contents/MacOS/node'), null);
   assert.equal(appBundle('/opt/homebrew/bin/node'), null);
+});
+
+test("a Puddle signed by Puddle's developer takes only updates signed by them; anything else isn't team-signed", async () => {
+  assert.match(TEAM_REQUIREMENT, new RegExp(`leaf\\[subject\\.OU\\] = "${TEAM}"`));
+  const app = fs.mkdtempSync(path.join(os.tmpdir(), 'puddle-adhoc-')) + '/Tiny.app';
+  fs.mkdirSync(`${app}/Contents/MacOS`, { recursive: true });
+  fs.copyFileSync('/usr/bin/true', `${app}/Contents/MacOS/Tiny`);
+  fs.writeFileSync(`${app}/Contents/Info.plist`, '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Tiny</string><key>CFBundleIdentifier</key><string>test.tiny</string></dict></plist>');
+  execFileSync('/usr/bin/codesign', ['-s', '-', '--force', app]);
+  assert.equal(await signedByTeam(app), false);
+  assert.equal(await signedByTeam('/nonexistent.app'), false);
+  fs.rmSync(path.dirname(app), { recursive: true, force: true });
 });

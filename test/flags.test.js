@@ -4,33 +4,24 @@ import * as R from '../collector/flags.js';
 import { evaluate } from '../scripts/flag-eval.js';
 
 const DAY = 86400_000;
-// prompts at 11:00 Berlin time on the given days ago (weekdays only)
 const at = (now, daysAgo) => daysAgo.map((d) => now - d * DAY);
-const NOW = Date.parse('2026-10-15T15:00:00Z'); // a Thursday afternoon in Berlin
+const NOW = Date.parse('2026-10-15T15:00:00Z');
 
 test('quiet: regular user who stopped is flagged; weekends, short breaks and occasional users are not', () => {
   const weekdaysBack = (from, to) => { const out = []; for (let d = from; d <= to; d++) { const dow = new Date(NOW - d * DAY).getUTCDay(); if (dow && dow !== 6) out.push(d); } return out; };
-  // worked every weekday for 4 weeks, nothing for the last 8 days
   assert.equal(R.quietRule(at(NOW, weekdaysBack(8, 36)), 'Europe/Berlin', NOW)?.kind, 'quiet');
-  // last worked on Friday, it's Monday morning → never flagged
   const MON = Date.parse('2026-10-12T07:00:00Z');
   const friBack = []; for (let d = 3; d <= 31; d++) { const dow = new Date(MON - d * DAY).getUTCDay(); if (dow && dow !== 6) friBack.push(d); }
   assert.equal(R.quietRule(at(MON, friBack), 'Europe/Berlin', MON), null);
-  // occasional user (1–2 days a week) silent for 6 working days → normal for them
   assert.equal(R.quietRule(at(NOW, [9, 16, 17, 23, 30, 31, 37, 44, 45, 51]), 'Europe/Berlin', NOW), null);
-  // 3 working days off → not long enough (often a short holiday)
   assert.equal(R.quietRule(at(NOW, weekdaysBack(3, 36)), 'Europe/Berlin', NOW), null);
 });
 
 test('failures are judged against what is normal for the same tools', () => {
   const ref = (t) => ({ Bash: 0.08, Read: 0.02 }[t] ?? 0.05);
-  // 12% Bash failures is normal for a Bash-heavy person → no flag
   assert.deepEqual(R.failureRules([{ tool: 'Bash', calls: 100, fails: 12 }], ref), []);
-  // 30% is not
   assert.equal(R.failureRules([{ tool: 'Bash', calls: 100, fails: 30 }], ref)[0].kind, 'failures');
-  // small samples never flag
   assert.deepEqual(R.failureRules([{ tool: 'Bash', calls: 10, fails: 4 }], ref), []);
-  // a broken connector is reported once, as a setup problem, not also as "failures"
   const out = R.failureRules([{ tool: 'mcp__slack__search', calls: 10, fails: 8 }, { tool: 'mcp__slack__post', calls: 6, fails: 5 }, { tool: 'Read', calls: 80, fails: 1 }], ref);
   assert.deepEqual(out.map((f) => f.kind), ['broken']);
   assert.match(out[0].text, /slack connector failed 13 of 16 tries: probably a setup problem/);

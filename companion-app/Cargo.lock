@@ -1938,6 +1938,9 @@ dependencies = [
 name = "joule"
 version = "0.0.1"
 dependencies = [
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde_json",
  "tauri",
  "tauri-build",

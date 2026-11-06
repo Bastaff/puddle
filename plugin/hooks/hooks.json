@@ -3,7 +3,7 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/joule\" hook claude-code", "timeout": 5 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/puddle\" hook claude-code", "timeout": 5 }
         ]
       }
     ]

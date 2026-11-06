@@ -1,4 +1,3 @@
-// What every agent adapter needs to read an agent's local files (never prompt or response text).
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -15,7 +14,6 @@ export function jwtClaims(t) {
 export function onPath(name, env) {
   return (env.PATH || '').split(path.delimiter).filter(Boolean).map((d) => path.join(d, name)).filter(exists);
 }
-// an editor extension, in every editor that installs VS Code extensions
 export const editorExtensions = (home, prefix) => ['.vscode', '.vscode-insiders', '.cursor', '.windsurf'].flatMap((d) => lsDir(path.join(home, d, 'extensions'))
   .filter((e) => e.name.startsWith(prefix)).map((e) => ({ kind: `${d.slice(1)} extension`, path: path.join(home, d, 'extensions', e.name) })));
 export const existing = (list) => list.filter(([, p]) => exists(p)).map(([kind, p]) => ({ kind, path: p }));
@@ -32,5 +30,8 @@ export function walk(dir, test, out = [], depth = 0) {
 
 export function eachLine(file, fn) {
   let text; try { text = fs.readFileSync(file, 'utf8'); } catch { return; }
+  eachRecord(text, fn);
+}
+export function eachRecord(text, fn) {
   for (const line of text.split('\n')) { if (!line) continue; let r; try { r = JSON.parse(line); } catch { continue; } if (fn(r) === false) return; }
 }

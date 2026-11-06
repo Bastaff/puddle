@@ -1,5 +1,3 @@
-// The same data in SQLite (device) and Postgres (team service) must give the same
-// dashboard, query for query. Postgres here is PGlite: real Postgres, in-process.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -11,9 +9,7 @@ import { makeQueries } from '../collector/queries.js';
 import { demoHistory } from '../collector/demo.js';
 
 
-// Plain data, minus the clock.
 const norm = (x) => JSON.parse(JSON.stringify(x, (k, v) => (k === 'now' ? undefined : v)));
-// Equal, except decimals may differ by a billionth (sums can add up in a different order).
 function same(a, b, where = '') {
   if (typeof a === 'number' && typeof b === 'number') {
     if (Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b))) return;
@@ -36,11 +32,10 @@ test('SQLite and Postgres return the same dashboard for the same data', async ()
   const pg = pglite();
   const pgs = await openPgStore(pg);
   try {
-    // same input, same order (structuredClone: inserting must not depend on shared objects)
     assert.equal(lite.insertEvents(structuredClone(rows)), await pgs.insertEvents(structuredClone(rows)), 'same number of events stored');
     assert.equal(lite.insertPoints(structuredClone(points)), await pgs.insertPoints(structuredClone(points)), 'same number of metric points');
     assert.equal(lite.insertEvents(structuredClone(rows.slice(0, 50))), await pgs.insertEvents(structuredClone(rows.slice(0, 50))), 'resent batch ignored in both');
-    const a = makeQueries(lite, { now: () => now }), b = makeQueries(pgs.sql, { now: () => now }); // one clock for both, or a slow run straddles a boundary
+    const a = makeQueries(lite, { now: () => now }), b = makeQueries(pgs.sql, { now: () => now });
     const week = { from: now - 7 * 86400_000, to: now + 60_000 };
     const day = { from: now - 86400_000, to: now + 60_000 };
     const cases = {
@@ -66,7 +61,6 @@ test('SQLite and Postgres return the same dashboard for the same data', async ()
     for (const [name, run] of Object.entries(cases)) {
       same(norm(await run(a)), norm(await run(b)), name);
     }
-    // and the comparison means something: there is real data in it
     const team = await b.team(week, 60);
     assert.ok(team.people.length >= 8 && team.people.some((p) => p.flags.length), 'demo team with flags');
   } finally {

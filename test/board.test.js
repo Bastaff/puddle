@@ -1,5 +1,3 @@
-// Loading per card must not change a single number: the table first (parts: 'core'), the calendar and code changes
-// from their own requests, together exactly what one big answer used to be (Postgres, the team service's path).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openPgStore } from '../collector/db.js';

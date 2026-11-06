@@ -1,13 +1,3 @@
-// Motion: spring physics for every animation, and a budget that turns motion
-// down when it would waste battery.
-//
-// Springs are simulated once and handed to the browser as a CSS `linear()`
-// easing (or as keyframes), so they run on the compositor with no JavaScript
-// per frame. The budget is:
-//   full  normal
-//   lite  power saving (frame rate capped, or battery low): short, purposeful
-//         motion only, no looping pulses, no particles, no flights
-//   off   tab in the background or "reduce motion" is on: nothing moves
 'use strict';
 
 const Motion = (() => {
@@ -24,9 +14,6 @@ const Motion = (() => {
     for (const f of listeners) f(next);
   }
 
-  // Low Power Mode on iPhone/iPad/Mac caps animation frames at 30 per second.
-  // A one-second sample every two minutes (only while visible) detects it; the
-  // median frame time ignores the odd slow frame from a busy render.
   function probe() {
     if (document.hidden) return;
     const gaps = [];
@@ -37,7 +24,7 @@ const Motion = (() => {
       if (gaps.length < 40) requestAnimationFrame(step);
       else {
         gaps.sort((a, b) => a - b);
-        fpsLow = gaps[gaps.length >> 1] > 24; // slower than ~42 fps
+        fpsLow = gaps[gaps.length >> 1] > 24;
         compute();
       }
     };
@@ -46,7 +33,6 @@ const Motion = (() => {
   setTimeout(probe, 2500);
   setInterval(probe, 120_000);
 
-  // Battery (Chromium only): on battery and at 20% or less.
   navigator.getBattery?.().then((b) => {
     const f = () => { batteryLow = !b.charging && b.level <= 0.2; compute(); };
     b.addEventListener('levelchange', f); b.addEventListener('chargingchange', f); f();
@@ -56,9 +42,6 @@ const Motion = (() => {
   reduced.addEventListener?.('change', compute);
   compute();
 
-  // ---- springs ----------------------------------------------------------------
-  // Damped harmonic oscillator from 0 to 1. Returns the samples, the time it
-  // takes to settle, and a CSS linear() easing that replays it.
   const cache = new Map();
   function spring({ stiffness = 170, damping = 26, mass = 1, velocity = 0 } = {}) {
     const key = `${stiffness}|${damping}|${mass}|${velocity}`;
@@ -82,24 +65,20 @@ const Motion = (() => {
   }
   const linearOK = window.CSS?.supports?.('transition-timing-function', 'linear(0, 1)');
   const SPRINGS = {
-    // Calm, nearly critically damped: weight and follow-through, barely any bounce.
-    snappy: { stiffness: 300, damping: 31 },   // UI that should feel instant
-    gentle: { stiffness: 140, damping: 23 },   // bars and numbers settling
-    bouncy: { stiffness: 220, damping: 25 },   // things arriving (≈2% overshoot)
+    snappy: { stiffness: 300, damping: 31 },
+    gentle: { stiffness: 140, damping: 23 },
+    bouncy: { stiffness: 220, damping: 25 },
   };
   function ease(name) {
     const s = spring(SPRINGS[name]);
     return linearOK ? { easing: s.easing, duration: s.duration } : { easing: 'cubic-bezier(.2,.8,.2,1)', duration: Math.min(600, s.duration) };
   }
-  // Expose springs to CSS: var(--spring-gentle) and var(--spring-gentle-d).
   for (const n of Object.keys(SPRINGS)) {
     const e = ease(n);
     root.style.setProperty(`--spring-${n}`, e.easing);
     root.style.setProperty(`--spring-${n}-d`, `${e.duration}ms`);
   }
 
-  // An impulse: something at rest gets a kick and wobbles back (a landing,
-  // a nudge). Returns keyframes of the offset from rest, starting and ending at 0.
   function impulse({ amplitude = 1, frequency = 9, decay = 7, duration = 520, steps = 26 } = {}) {
     const k = [];
     for (let i = 0; i <= steps; i++) {
@@ -109,12 +88,10 @@ const Motion = (() => {
     return k;
   }
 
-  // A thrown object under gravity from a to b: keyframes of [x, y, tilt].
   function arc([x0, y0], [x1, y1], { lift = 90, steps = 28 } = {}) {
     const top = Math.min(y0, y1) - lift;
-    // parabola through both ends with its vertex at `top`
     const h0 = y0 - top, h1 = y1 - top;
-    const r = Math.sqrt(h0) / (Math.sqrt(h0) + Math.sqrt(h1) || 1); // share of time rising
+    const r = Math.sqrt(h0) / (Math.sqrt(h0) + Math.sqrt(h1) || 1);
     const pts = [];
     for (let i = 0; i <= steps; i++) {
       const u = i / steps;

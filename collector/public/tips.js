@@ -1,7 +1,4 @@
-// Tooltips for pages outside the team dashboard (Me, a teammate's page): the same look and the same
-// Learn mode as app.js. Hover shows the numbers; with Learn on (the "?"), every tooltip also explains
-// what was hovered, and parts without numbers explain themselves (nearest [data-learn], see learn.js).
-const LEARN = globalThis.LEARN || { on: false, explain: () => '' }; // learn.js (a classic script) must load first
+const LEARN = globalThis.LEARN || { on: false, explain: () => '' };
 let tip = document.getElementById('tip');
 if (!tip) { tip = document.createElement('div'); tip.id = 'tip'; tip.className = 'tip'; tip.setAttribute('role', 'tooltip'); tip.hidden = true; document.body.append(tip); }
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -29,7 +26,6 @@ export function hover(el, html) {
 }
 export const learn = LEARN;
 addEventListener('scroll', hideTip, { passive: true });
-// parts without their own tooltip still explain themselves in Learn mode
 let learnTip = false;
 const ownTip = (n) => { for (; n && n !== document.body; n = n.parentElement) { if (n.onmousemove) return true; if (n.dataset?.learn) return false; } return false; };
 document.addEventListener('mousemove', (e) => {

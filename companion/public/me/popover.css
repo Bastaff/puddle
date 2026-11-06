@@ -1,0 +1,35 @@
+html.pp-page, .pp-body { background: transparent !important; margin: 0; overflow: hidden; }
+.pp-body, .pp-body * { -webkit-user-select: none; user-select: none; -webkit-user-drag: none; cursor: default; }
+.pp { margin: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--page); border-radius: calc(18px * var(--sq)); box-shadow: 0 10px 28px rgba(0, 0, 0, .18), 0 1px 3px rgba(0, 0, 0, .12), 0 0 0 .5px rgba(0, 0, 0, .12); min-height: calc(100vh - 28px); box-sizing: border-box; font-family: var(--font); color: var(--ink); }
+.pp-wait { margin: auto; }
+.pp-state { margin: 0; min-width: 0; }
+.pp-state .pv-state { min-width: 0; max-width: 100%; }
+.pp-state .pv-state > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp .you-today { padding: 10px 12px 8px; margin: 0; }
+.pp .you-today header { margin-bottom: 2px; }
+.pp .you-today .day-legend { display: none; }
+.pp .you-today .day-head { flex-wrap: wrap; gap: 4px 8px; }
+.pp .you-today .day-head b { font-size: 34px; }
+.pp .you-today .pill-cmp { white-space: nowrap; }
+.pp .pp-six { position: relative; padding: 14px 0 0; }
+.pp .pp-six svg { width: 100%; height: auto; display: block; overflow: visible; }
+.pp-now { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; font-weight: 800; color: var(--ink); line-height: 1; }
+.pp-ticks { position: relative; height: 16px; margin-top: 4px; }
+.pp-ticks span { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.pp .pp-week { display: grid; grid-template-columns: 1fr !important; margin: 0; }
+.pp .pp-work { padding: 10px 12px; margin: 0; gap: 8px; }
+.pp-mix { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; }
+.pp-mix i { display: block; min-width: 3px; }
+.pp-kinds { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); }
+.pp-kinds span { display: inline-flex; align-items: center; gap: 4px; }
+.pp-kinds .ic { width: 13px; height: 13px; fill: var(--c); }
+.pp-kinds b { color: var(--ink); }
+.pp-doors { display: grid; grid-template-columns: 1fr 1fr 42px; gap: 6px; }
+.pp-doors:not(:has(#team)) { grid-template-columns: 1fr 42px; }
+.pp-door { height: 40px; font-size: 15px; display: flex; align-items: center; justify-content: center; padding: 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-gear { padding: 0; color: var(--ink-2); }
+.pp-door[aria-disabled="true"] { opacity: .4; }
+.pp-upd { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); background: var(--tint-today); border-radius: calc(12px * var(--sq)); padding: 8px 10px; }
+.pp-upd span { flex: 1; min-width: 0; }
+.pp-brand { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: auto; font-size: 12.5px; color: var(--muted); }
+.pp-brand b { color: var(--ink-2); font-weight: 800; }

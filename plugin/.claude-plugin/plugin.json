@@ -1,5 +1,5 @@
 {
-  "name": "joule",
+  "name": "puddle",
   "version": "0.0.1",
   "description": "See how you use your coding agents: prompts, tokens, kinds of work and your rhythm, on a private dashboard. Works with Claude Code and Codex. Only counts and lengths are shared, never what you ask or what the agent answers.",
   "author": { "name": "Puddle" },

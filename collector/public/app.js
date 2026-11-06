@@ -1,103 +1,26 @@
-// Claude Usage — dashboard client.
 'use strict';
 
 const $ = (s) => document.querySelector(s);
-// The personal view (Puddle · Me) reuses this page for one person: say "you", not "the team".
 const SOLO = document.body.classList.contains('personal');
 const HOUR = 3600_000, DAY = 24 * HOUR;
 const state = { range: '7d', tab: 'live' };
 try { Object.assign(state, JSON.parse(localStorage.getItem('cu2') || '{}')); } catch {}
-delete state.user; // the one-person filter is gone (a better overview comes later); an old saved choice is dropped
-const save = () => { try { localStorage.setItem('cu2', JSON.stringify({ ...state, zoom: null })); } catch {} }; // zoom is per visit
-let D = null; // last loaded data, reused on resize
-// The page as its owner arranged it (layout.js): a hidden card isn't drawn, and the team's view leaves out the parts
-// only it needs (most cards share the people data; these two have their own). A card brought back loads what it needs.
+if (state.range === 'today') state.range = '1d';
+delete state.user;
+const save = () => { try { localStorage.setItem('cu2', JSON.stringify({ ...state, zoom: null })); } catch {} };
+let D = null;
 const SKIP_PART = { recent: 'recent', features: 'features' };
 const layout = Layout.mount('team', $('#grid'), { before: $('#learn-btn'), load: Layout.account.load, save: Layout.account.save,
   onShow: (id) => { if (SKIP_PART[id]) load(); else { render(); cards.refresh(); } },
-  onResize: () => requestAnimationFrame(render) }); // the map draws to its card's width
+  onResize: () => requestAnimationFrame(render) });
 const shownCard = (id) => layout.visible(id);
 const skipped = () => Object.keys(SKIP_PART).filter((id) => !shownCard(id)).map((id) => SKIP_PART[id]).sort().join(',');
-// Cost is an estimate at API list prices; on a subscription it's noise, so it's opt-in.
-const showCost = () => false; // people are on subscriptions (a monthly allowance), so list-price $ would mislead
+const showCost = () => false;
 const evTokens = (e) => (e.input_tokens || 0) + (e.output_tokens || 0) + (e.cache_read || 0) + (e.cache_creation || 0);
 
-// ---------- sound ----------
-// Synthesized with Web Audio: soft sine/triangle tones, quiet, filtered,
-// rate-limited. Browsers only allow audio after the first click or key.
-const Sound = (() => {
-  let ctx = null, out = null;
-  let on = false;
-  try { on = localStorage.getItem('cu-sound') === '1'; } catch { on = false; } // opt-in
-  const last = {};
-  let lastAny = 0;
-  // Each person gets their own voice: a pitch from a pentatonic scale and a
-  // timbre, so you can tell who is working without looking.
-  const PERSON = [[0, 'sine'], [5, 'triangle'], [-5, 'sine'], [7, 'triangle'], [3, 'sine'], [-3, 'triangle'], [10, 'sine'], [-7, 'triangle'], [12, 'sine'], [2, 'triangle']];
-  let cur = { r: 1, type: null };
+const Sound = globalThis.PuddleSound;
 
-  function ensure() {
-    if (!ctx) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      ctx = new AC();
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2600; lp.Q.value = 0.3;
-      const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -30; comp.ratio.value = 4;
-      out = ctx.createGain(); out.gain.value = 0.8;
-      out.connect(lp).connect(comp).connect(ctx.destination);
-    }
-    if (ctx.state === 'suspended') ctx.resume();
-    return ctx;
-  }
-  // One soft note: quick 12ms fade-in, exponential fade-out, no clicks.
-  function note(freq, at, len, { gain = 0.03, type = 'sine', to = null } = {}) {
-    freq *= cur.r; if (to) to *= cur.r;
-    if (cur.type && type === 'sine') { type = cur.type; gain *= cur.type === 'triangle' ? 0.8 : 1; }
-    const t = ctx.currentTime + at;
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = type; o.frequency.setValueAtTime(freq, t);
-    if (to) o.frequency.exponentialRampToValueAtTime(to, t + len);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gain, t + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
-    o.connect(g).connect(out);
-    o.start(t); o.stop(t + len + 0.02);
-  }
-  const voices = {
-    prompt:  () => { note(659.3, 0, 0.22, { gain: 0.028 }); note(987.8, 0.07, 0.28, { gain: 0.022 }); },      // you sent a prompt: soft rising pair
-    request: () => note(1318.5, 0, 0.14, { gain: 0.014 }),                                                     // Claude answered: tiny high tick
-    tool:    () => note(880, 0, 0.09, { gain: 0.016, type: 'triangle' }),                                      // a tool ran: wooden tap
-    fail:    () => { note(392, 0, 0.26, { gain: 0.03 }); note(329.6, 0.1, 0.32, { gain: 0.026 }); },           // failure: low falling pair
-    recover: () => [783.9, 987.8, 1174.7].forEach((f, i) => note(f, i * 0.07, 0.34, { gain: 0.016 })),        // recovered data: little chime
-    success: () => [523.3, 659.3, 783.9].forEach((f, i) => note(f, i * 0.08, 0.4, { gain: 0.024 })),          // test passed: major arpeggio
-    remove:  () => note(440, 0, 0.3, { gain: 0.03, to: 220 }),                                                 // data deleted: soft slide down
-    toggle:  () => note(1046.5, 0, 0.08, { gain: 0.014 }),
-  };
-  function play(name, delay = 0, who = null) {
-    if (delay) { setTimeout(() => play(name, 0, who), delay); return; } // rate-limit when it actually plays
-    if (!on || !voices[name] || (document.visibilityState === 'hidden' && name === 'request')) return;
-    const now = performance.now(), key = name + '|' + who;
-    if (now - (last[key] || 0) < 600 || now - lastAny < 140) return; // never a barrage
-    last[key] = lastAny = now;
-    if (!ensure()) return;
-    const v = who == null || who < 0 ? null : PERSON[who % PERSON.length];
-    cur = v ? { r: Math.pow(2, v[0] / 12), type: v[1] } : { r: 1, type: null };
-    try { voices[name](); } catch {}
-    cur = { r: 1, type: null };
-  }
-  const unlock = () => { if (on) ensure(); };
-  addEventListener('pointerdown', unlock, { once: true });
-  addEventListener('keydown', unlock, { once: true });
-  return {
-    play,
-    get on() { return on; },
-    set on(v) { on = v; try { localStorage.setItem('cu-sound', v ? '1' : '0'); } catch {} },
-  };
-})();
-
-// ---------- format ----------
 const nf = new Intl.NumberFormat();
-// 1.2k · 330.8m · 1.7b — one lowercase letter, never "bn"
 const compact = (n) => {
   if (n == null) return '—';
   const a = Math.abs(n), one = (v, u) => `${new Intl.NumberFormat(undefined, { maximumFractionDigits: v < 100 ? 1 : 0 }).format(v)}${u}`;
@@ -106,7 +29,6 @@ const compact = (n) => {
   if (a >= 1e3) return one(n / 1e3, 'k');
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: a < 10 ? 1 : 0 }).format(n);
 };
-// Clock-style duration for waits: 0:45 · 12:00 · 1:05:30
 const clock = (ms) => {
   if (ms == null) return '—';
   const t = Math.round(ms / 1000), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
@@ -121,8 +43,7 @@ const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y)
 const SLOTS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)', 'var(--s7)', 'var(--s8)'];
 const WAIT = [{ key: 'claude', label: 'Claude', color: 'var(--s1)' }, { key: 'tools', label: 'Tools', color: 'var(--s2)' }];
 
-// ---------- people ----------
-let people = []; // from filters.users, ordered by first seen → stable colors
+let people = [];
 const colorOf = (key) => SLOTS[Math.max(0, people.findIndex((p) => p.user_key === key)) % SLOTS.length];
 const initials = (p) => {
   const n = (p?.name || p?.email || '?').replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
@@ -136,16 +57,12 @@ const isLive = (p) => p.last_active && Date.now() - p.last_active < 3 * 60_000;
 const displayName = (p) => p?.name || (p?.email || '').replace(/@.*/, '') || 'Unknown';
 const avatar = (p, cls = '') => `<span class="avatar ${cls}" style="background:${colorOf(p.user_key)}">${esc(initials(p))}<span class="presence${isLive(p) ? ' on' : ''}"></span></span>`;
 
-// ---------- range ----------
+const RANGE_LEN = { '1d': DAY, '7d': 7 * DAY, '30d': 30 * DAY, '90d': 90 * DAY };
 function bounds() {
-  const now = Date.now();
-  const mid = new Date(); mid.setHours(0, 0, 0, 0);
-  const len = { today: now - mid.getTime(), '7d': 7 * DAY, '30d': 30 * DAY, '90d': 90 * DAY }[state.range] || 7 * DAY;
+  const now = Date.now(), len = RANGE_LEN[state.range] || 7 * DAY;
   return { from: now - len, to: now, len };
 }
-// Demo team: same API with ?demo=1, served from a separate synthetic database.
 if (new URLSearchParams(location.search).get('demo') === '1') state.demo = true;
-// Team dashboards (?team=<id> on the page) ask the service for that team's scope on every call.
 const TEAM = new URLSearchParams(location.search).get('team');
 const api = (u) => {
   const add = (k, v) => { u += (u.includes('?') ? '&' : '?') + k + '=' + encodeURIComponent(v); };
@@ -157,10 +74,7 @@ function qs(extra = {}) {
   return new URLSearchParams({ from, to: to + 60_000, ...extra }).toString();
 }
 
-// ---------- tooltip ----------
 const tip = $('#tip');
-// In learn mode every tooltip gets a plain-language explanation of what was
-// hovered (the nearest element with data-learn).
 function showTip(e, html) {
   if (LEARN.on) {
     const x = LEARN.explain(e.target?.closest?.('[data-learn]')?.dataset.learn);
@@ -178,7 +92,6 @@ const hideTip = () => { tip.hidden = true; };
 const rows = (pairs) => pairs.map(([k, v, c]) => `<div class="row"><span>${c ? `<i style="background:${c}"></i>` : ''}${esc(k)}</span><span>${v}</span></div>`).join('');
 function hover(el, html) { el.onmousemove = (e) => showTip(e, typeof html === 'function' ? html(e) : html); el.onmouseleave = hideTip; el.ontouchstart = (e) => showTip(e.touches[0], typeof html === 'function' ? html(e.touches[0]) : html); }
 addEventListener('scroll', hideTip, { passive: true });
-// Elements without their own tooltip still explain themselves in learn mode.
 let learnTip = false;
 const ownTip = (n) => { for (; n && n !== document.body; n = n.parentElement) { if (n.onmousemove) return true; if (n.dataset?.learn) return false; } return false; };
 document.addEventListener('mousemove', (e) => {
@@ -186,7 +99,6 @@ document.addEventListener('mousemove', (e) => {
   if (e.target.closest?.('[data-learn]')) { showTip(e, ''); learnTip = true; } else if (learnTip) { hideTip(); learnTip = false; }
 });
 
-// ---------- svg primitives ----------
 function niceMax(v) {
   if (!v) return 1;
   const e = Math.pow(10, Math.floor(Math.log10(v)));
@@ -205,7 +117,6 @@ function spark(values, color) {
     <path d="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
 }
 
-// Stacked bars. rowsByKey[k][series.key] = value.
 function bars(el, keys, rowsByKey, series, o = {}) {
   const W = el.clientWidth || 400, H = el.clientHeight || 160;
   const m = { l: o.noY ? 2 : 36, r: 2, t: 6, b: o.noX ? 4 : 18 };
@@ -218,7 +129,6 @@ function bars(el, keys, rowsByKey, series, o = {}) {
   const fmt = o.fmt || compact;
   const empty = !tot.some(Boolean);
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.aria || 'chart')}">`;
-  // Pick a tick count that lands on round numbers (e.g. 200/400/600/800, not 267/533).
   const clean = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); return [1, 2, 2.5, 5, 10].some((m) => Math.abs(v / e - m) < 1e-9); };
   const nt = [4, 3, 2, 5].find((n) => clean(max / n)) || 3;
   for (let i = 0; i <= (empty || o.noY ? 0 : nt); i++) {
@@ -254,7 +164,6 @@ function bars(el, keys, rowsByKey, series, o = {}) {
   }
 }
 
-// Full-circle ring; segments [{v: 0..1, color}]
 function ring(segments, value, unit, label, sev = '') {
   const R = 38, C = 2 * Math.PI * R;
   let off = 0, arcs = '';
@@ -270,7 +179,6 @@ function ring(segments, value, unit, label, sev = '') {
 }
 const severity = (pct) => (pct >= 90 ? { color: 'var(--critical)', mark: '<span class="sev crit" aria-label="critical">●</span>' } : pct >= 70 ? { color: 'var(--warn)', mark: '<span class="sev warn" aria-label="high">▲</span>' } : { color: 'var(--s1)', mark: '' });
 
-// ---------- KPIs ----------
 function delta(cur, prev) {
   if (!prev) return '';
   const d = (cur - prev) / prev;
@@ -278,19 +186,14 @@ function delta(cur, prev) {
   return `<span class="delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'}${Math.abs(d * 100) >= 100 ? Math.round(Math.abs(d * 100)) : Math.abs(d * 100).toFixed(0)}%</span>`;
 }
 
-// Tiles are built once; afterwards only their parts update, so values can
-// roll like reels instead of being redrawn.
 const kpiValues = {};
 function renderKpis(d) {
   const working = d.team.people.filter((p) => nowState(p).kind === 'work').length;
   const h = { ...d.team.headline, activeNow: working };
-  const { keys } = bucketKeys(d.board.timeseries);
-  const by = Object.fromEntries(d.board.timeseries.rows.map((r) => [r.bucket, r]));
-  const pr = Object.fromEntries(d.board.timeseries.prompts.map((r) => [r.bucket, r.n]));
-  const tokOf = (r) => (r?.input || 0) + (r?.output || 0) + (r?.cacheRead || 0) + (r?.cacheCreation || 0);
+  const { keys, at } = bucketKeys(d.board.timeseries);
+  const pr = {}; for (const r of d.board.timeseries.prompts) pr[at(r.bucket)] = (pr[at(r.bucket)] || 0) + Number(r.n || 0);
   const meter = (v, color) => `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="22" width="100" height="5" rx="2.5" fill="var(--wash)"/><rect x="0" y="22" width="${Math.max(0, Math.min(100, v * 100))}" height="5" rx="2.5" fill="${color}"/></svg>`;
   const presence = `<svg viewBox="0 0 100 30" aria-hidden="true">${d.team.people.slice(0, 12).map((p, i) => { const st = nowState(p); return `<circle cx="${6 + i * 8}" cy="22" r="3.2" fill="${st.kind === 'work' ? st.color : 'var(--axis)'}"/>`; }).join('')}</svg>`;
-  // Questions a team lead asks, each answered in one number.
   const H = { minutes: d.team.headline.activeMinutes || 0, prev: d.team.headline.prevMinutes || 0, long: d.team.headline.longRuns || 0,
     runs: d.team.headline.runPrompts || 0, smooth: d.team.headline.smoothPrompts || 0, outside: d.team.headline.outsideMinutes || 0, near: d.team.headline.nearLimit || 0 };
   const share = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -307,11 +210,10 @@ function renderKpis(d) {
     { id: 'hours', label: 'Outside hours', value: `${share(H.outside, H.minutes)}%`, unit: 'of time', spark: meter(H.minutes ? H.outside / H.minutes : 0, 'var(--s4)'),
       tip: 'Active time in the evening (19–24), at night (0–8) or at the weekend, in each person\'s own time zone.' },
   ];
-  // no plan data from anyone yet: no "Near a plan limit" tile (it would only ever say 0)
   if (!d.team.people.some((p) => p.five_pct != null || p.week_pct != null)) tiles.splice(tiles.findIndex((t) => t.id === 'limits'), 1);
   const box = $('#kpis');
   box.style.gridTemplateColumns = innerWidth > 1180 ? `repeat(${tiles.length}, minmax(0, 1fr))` : '';
-  if (box.children.length !== tiles.length || box.querySelector('.sk')) { // first data replaces the loading tiles
+  if (box.children.length !== tiles.length || box.querySelector('.sk')) {
     box.innerHTML = tiles.map((t) => `<div class="kpi" data-k="${t.id}" data-learn="kpi:${t.id}"><div class="k"><span>${t.label}</span><span class="dl"></span></div><div class="v"><span class="val"></span><small class="unit"></small></div><div class="sp"></div></div>`).join('');
   }
   tiles.forEach((t, i) => {
@@ -328,8 +230,6 @@ function renderKpis(d) {
 }
 const rollKpi = (id) => { const el = document.querySelector(`.kpi[data-k="${id}"] .val`); if (el && kpiValues[id] != null) roll(el, kpiValues[id]); };
 
-// Slot-reel number change: each changed digit scrolls to its new value.
-// `matches` = nothing should move right now (reduce motion, or tab hidden); see motion.js
 const REDUCED = { get matches() { return !Motion.any(); } };
 function roll(el, text) {
   const old = el.dataset.v;
@@ -352,14 +252,10 @@ function roll(el, text) {
   el._t = setTimeout(() => { el.textContent = text; }, 1400);
 }
 
-// ---------- people board ----------
 const FEATS = [
   ['skills', 'S', 'Skills'], ['mcp', 'M', 'MCP connectors'], ['subagents', 'A', 'Subagents'],
   ['web', 'W', 'Web search'], ['edits', 'E', 'File edits'], ['mentions', '@', '@-mentions'], ['plugins', 'P', 'Plugins'],
 ];
-// One row per person, read without reading: what they are doing now (icon +
-// colour), when and how hard they worked (activity lane), what kind of work
-// (mix bar), how much (volume bar) and how big the tasks are they hand to Claude (task size).
 const CAT = {
   read:  { label: 'Read',   verb: 'Reading',     c: 'var(--k-read)',  ic: '<circle cx="6.8" cy="6.8" r="5.4" opacity=".35"/><circle cx="6.8" cy="6.8" r="2.6"/><rect x="9.4" y="10.7" width="6.2" height="3" rx="1.5" transform="rotate(45 12.5 12.2)"/>' },
   edit:  { label: 'Edit',   verb: 'Editing',    c: 'var(--k-edit)',  ic: '<path d="M3 9.8 1.9 13.6a.4.4 0 0 0 .5.5L6.2 13z" opacity=".45"/><path d="M10.9 1.9a1.6 1.6 0 0 1 2.3 0l.9.9a1.6 1.6 0 0 1 0 2.3L6.6 12.6 3.4 9.4z"/>' },
@@ -388,15 +284,11 @@ const catOf = (tool) => {
 };
 const dominant = (mix) => { let best = null; for (const k of CATS) if ((mix[k] || 0) > (mix[best] || 0)) best = k; return best; };
 
-// The agents someone has going right now (conversations that moved in the last 3 minutes): one mark per agent, with
-// how many run at once ("×3"); hovering says in which apps ("Claude Code · terminal ×2, VS Code"). People run Claude
-// Code and Codex side by side, or several Claude Codes at once. Original marks in each agent's colour; one Puddle
-// doesn't know yet shows its letter.
 const MARKS = {
   'claude-code': { c: '#d97757', svg: '<path d="M8 .9 9.1 6 13 2.6 10.4 7.1l5.1.4-5 1.3 3.8 3.5-4.7-2.2.3 5.2L8 10.6l-1.9 4.7.3-5.2-4.7 2.2 3.8-3.5-5-1.3 5.1-.4L3 2.6 6.9 6z"/>' },
   codex: { c: 'var(--ink)', svg: '<path d="M8 .8 14.3 4.4v7.2L8 15.2 1.7 11.6V4.4z" opacity=".22"/><path d="M8 2.6 12.7 5.3v5.4L8 13.4 3.3 10.7V5.3z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m5.8 6.4 1.9 1.6-1.9 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="8.4" y="9.1" width="2.4" height="1.4" rx=".7"/>' },
 };
-const AG = () => globalThis.JouleAgents;
+const AG = () => globalThis.PuddleAgents;
 const agentMark = (a) => {
   const m = MARKS[a] || { c: 'var(--muted)', svg: `<circle cx="8" cy="8" r="7" opacity=".25"/><text x="8" y="11.3" text-anchor="middle" font-size="9.5" font-weight="800">${esc(AG()?.agent(a).letter || '?')}</text>` };
   return `<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" style="color:${m.c}" aria-hidden="true">${m.svg}</svg>`;
@@ -407,7 +299,7 @@ function agentsNow(p) {
   for (const x of liveSessions(p)) { const a = x.agent || 'claude-code'; (by.get(a) || by.set(a, []).get(a)).push(x); }
   if (!by.size) return '';
   return `<span class="agents-now">${[...by].map(([a, list]) => {
-    const apps = new Map(); for (const x of list) { const l = AG()?.client(x.client)?.label; if (l) apps.set(l, (apps.get(l) || 0) + 1); } // an app nobody named: just the agent
+    const apps = new Map(); for (const x of list) { const l = AG()?.client(x.client)?.label; if (l) apps.set(l, (apps.get(l) || 0) + 1); }
     const tip = `${AG()?.agent(a).name || a}${list.length > 1 ? ` ×${list.length}` : ''}${apps.size ? ` · ${[...apps].map(([l, n]) => (n > 1 ? `${l} ×${n}` : l)).join(', ')}` : ''}`;
     return `<span class="an" title="${esc(tip)}" aria-label="${esc(tip)}">${agentMark(a)}${list.length > 1 ? `<b>×${list.length}</b>` : ''}</span>`;
   }).join('')}</span>`;
@@ -417,7 +309,6 @@ function nowState(p) {
   const n = p.now || {}, now = Date.now(), since = n.lastTs ? now - n.lastTs : Infinity;
   if (since < 90_000) {
     const doing = n.toolTs && now - n.toolTs < 120_000 ? n.doing : null;
-    // the agent that moved last thinks (Codex as much as Claude)
     const newest = [...(n.sessions || [])].sort((a, b) => b.ts - a.ts)[0], who = AG()?.agent(newest?.agent || 'claude-code').short || 'Claude';
     return { kind: 'work', ic: doing || 'think', color: doing ? CAT[doing].c : 'var(--k-think)', label: doing ? CAT[doing].verb : `${who} is thinking`,
       sub: n.promptTs ? ago(n.promptTs) : '' };
@@ -434,13 +325,10 @@ const BCOLS = [
   { key: 'autonomy', label: 'Task size', get: (p) => (p.runs?.prompts ? (p.runs.long * 2 + taskMix(p).short) / p.runs.prompts : -1) },
   { key: 'limits', label: 'Limits', get: (p) => (p.plan ? Math.max(p.plan.five_pct ?? 0, p.plan.week_pct ?? p.plan.month_pct ?? 0) : -1) },
 ];
-// Task size: the prompts split into questions (no steps), short tasks (1–19 steps the agent took on its own)
-// and long tasks (20+). The word names the way they work: long tasks stand out even as a minority.
 const taskMix = (p) => { const r = p.runs || {}, q = r.chat || 0, l = r.long || 0; return { prompts: r.prompts || 0, q, short: Math.max(0, (r.prompts || 0) - q - l), long: l }; };
 const handsOff = (p) => {
   const m = taskMix(p);
   if (!m.prompts) return { word: '—', tip: 'No prompts in this period' };
-  // long tasks stand out even as a minority (15%+); questions only when they are most of it
   const pc = (v) => `${Math.round((v / m.prompts) * 100)}% of ${nf.format(m.prompts)} prompts`;
   return m.long / m.prompts >= 0.15 ? { word: 'Long tasks', tip: `${pc(m.long)} ran 20+ steps on their own` }
     : m.q / m.prompts >= 0.5 ? { word: 'Questions', tip: `${pc(m.q)} used no tools` }
@@ -448,8 +336,6 @@ const handsOff = (p) => {
 };
 const hmm = (m) => `${Math.floor((m || 0) / 60)}:${String(Math.round((m || 0) % 60)).padStart(2, '0')}`;
 
-// Activity lane: one column per time slice, height = tool calls (same scale
-// for everyone), colour = kind of work, ink tick = a prompt, red = failure.
 const laneTotal = (b) => (b ? b.slice(1, 1 + CATS.length).reduce((a, v) => a + v, 0) : 0);
 function laneSvg(p, scale, liveNow) {
   const L = p.lane || [], n = L.length, H = 32, base = H - 5;
@@ -473,7 +359,6 @@ function mixBar(mix) {
   return `<div class="wm">${CATS.map((k) => (mix[k] ? `<i style="flex:${mix[k]};background:${CAT[k].c}"></i>` : '')).join('')}</div>
     <div class="dom" style="--c:${CAT[dom].c}">${icon(dom)}<span>${CAT[dom].label}</span><small>${Math.round((mix[dom] / tot) * 100)}%</small></div>`;
 }
-// Works on: what the agent spends its steps on, in words (top kinds with shares), and the tools behind it.
 const toolLabel = (t) => String(t || '').replace(/^mcp__/, '').replace(/__/g, ' · ').replace(/_/g, ' ');
 function worksOn(p) {
   const tot = CATS.reduce((a, k) => a + (p.mix[k] || 0), 0);
@@ -482,24 +367,18 @@ function worksOn(p) {
   return `<div class="wm">${CATS.map((k) => (p.mix[k] ? `<i style="flex:${p.mix[k]};background:${CAT[k].c}"></i>` : '')).join('')}</div>
     <div class="wo-k">${top.map((k) => `<span style="--c:${CAT[k].c}">${icon(k)}${CAT[k].label} <b>${Math.round((p.mix[k] / tot) * 100)}%</b></span>`).join('')}</div>`;
 }
-// One person's page: from a team, from the demo, or this device's own dashboard
 const personHref = (p) => { const q = new URLSearchParams(location.search), team = q.get('team');
   return `/person?${state.demo ? 'demo=1&' : team ? `team=${encodeURIComponent(team)}&` : ''}user=${encodeURIComponent(p.user_key)}`; };
 
-// Task size as three little bars: questions, short tasks, long tasks, each as tall as its share of prompts.
 function taskBars(p) {
   const m = taskMix(p);
   if (!m.prompts) return '<span class="tb none"></span>';
   return `<span class="tb">${[m.q, m.short, m.long].map((v, i) => `<i class="t${i}" style="--h:${v ? Math.max(12, Math.round((v / m.prompts) * 100)) : 0}%"></i>`).join('')}</span>`;
 }
-// Limits: two rings, one inside the other. Outer = the 5-hour window, inner = the week (Codex's month when that
-// is all it has). Each fills with how much is used: blue, amber from 80%, red from 95%.
-// why a person's limits aren't known right now, in words
 function limitsWhy(p) {
   const first = displayName(p).split(' ')[0], top = [...(p.clients || [])].sort((a, b) => b.sessions - a.sessions)[0]?.client;
   const last = p.plan?.seen ? ` Last reading: ${new Date(p.plan.seen).toLocaleDateString([], { day: 'numeric', month: 'short' })}.` : '';
-  // what the client they mostly work in can report (the agent catalogue, /agents.js)
-  const c = globalThis.JouleAgents?.client(top);
+  const c = globalThis.PuddleAgents?.client(top);
   if (c?.limits === 'none' && c.why?.limits) return `${first} works in ${c.label}. ${c.why.limits}.${last}`;
   return p.plan ? `No reading since the window started over.${last} They show again as soon as ${first} uses Claude in the terminal, the Claude app or Codex.` : `They show once ${first}'s Puddle sees Claude in the terminal, the Claude app or Codex being used.`;
 }
@@ -509,7 +388,6 @@ function limitRings(p) {
     const sev = v >= 95 ? 'var(--critical)' : v >= 80 ? 'var(--warn)' : 'var(--s1)', a = Math.max(v ? 8 : 0, Math.min(100, v)) * 3.6;
     return `<span class="lr ${cls}" style="--g:conic-gradient(${sev} 0 ${a}deg, var(--grid) ${a}deg 360deg)"></span>`;
   };
-  // nothing current (never seen, or every window started over since): a dotted "unknown", never an empty 0%
   if (!pl || pl.stale) return `<span class="lrs unknown" aria-label="Plan limits unknown"><span class="lr out"></span><span class="lr in"></span></span>`;
   return `<span class="lrs">${ring(pl.five_pct, 'out')}${ring(pl.week_pct ?? pl.month_pct, 'in')}</span>`;
 }
@@ -521,7 +399,6 @@ function trend(cur, prev) {
 
 function renderPeople(d) {
   const team = d.team.people.map((p) => ({ ...p, last_active: p.lastActive }));
-  // the cards drawn from the same people, each only when shown; then the table itself
   if (shownCard('issues')) renderAttention(team);
   if (shownCard('features')) { renderAdoption(team); renderNamed(team); }
   if (shownCard('map')) renderMap(team);
@@ -536,9 +413,6 @@ function renderPeople(d) {
   const span = d.team.lane ? Date.now() - d.team.lane.from : 0;
   const el = $('#ptable');
   const before = new Map([...el.querySelectorAll('.brow.body')].map((r) => [r.dataset.u, r.getBoundingClientRect().top]));
-  // Rows are updated in place, never rebuilt: only the cells whose content
-  // changed are touched, so pulses keep their rhythm, bars glide to new widths
-  // and a live update costs almost nothing.
   const headHtml = BCOLS.map((c) => `<span role="columnheader" data-k="${c.key}" data-learn="col:${{ now: 'now', mix: 'mix', prompts: 'prompts', autonomy: 'autonomy', limits: 'limits' }[c.key]}" ${c.key === sort.key ? `aria-sort="${sort.dir > 0 ? 'ascending' : 'descending'}"` : ''}>${c.key === 'lane' ? `<span>${c.label}</span><span class="axis-end">${span > 2 * DAY ? Math.round(span / DAY) + ' days' : 'today'} → now</span>` : c.label}</span>`).join('');
   let head = el.querySelector('.brow.head');
   if (!head) { el.innerHTML = ''; head = document.createElement('div'); head.className = 'brow head'; head.setAttribute('role', 'row'); el.appendChild(head); }
@@ -565,10 +439,10 @@ function renderPeople(d) {
         <div class="st">${esc(st.label)}${st.kind === 'work' ? agentsNow(p) : ''}${st.sub ? ` <small>· ${esc(st.sub)}</small>` : ''}${D.team.oldKeys?.[p.user_key] ? ' <span class="oldkey" aria-label="Live activity delayed">↻</span>' : ''}</div>`);
     put(r.querySelector('.mix-cell'), worksOn(p));
     r.querySelector('.vol i').style.width = `${((p.activeMinutes || 0) / maxM) * 100}%`;
-    put(r.querySelector('.vt'), `<span class="tv"><b>${hmm(p.activeMinutes)}</b> <small class="unit">h</small></span>`); // plan limits have their own card
+    put(r.querySelector('.vt'), `<span class="tv"><b>${hmm(p.activeMinutes)}</b> <small class="unit">h</small></span>`);
     put(r.querySelector('.sty-cell'), `${taskBars(p)}<small class="ho">${handsOff(p).word}</small>`);
     put(r.querySelector('.hl-cell'), limitRings(p));
-    if (el.children[i + 1] !== r) el.insertBefore(r, el.children[i + 1] || null); // move only when the order changed
+    if (el.children[i + 1] !== r) el.insertBefore(r, el.children[i + 1] || null);
   });
   for (const r of existing.values()) r.remove();
   if (!list.length) el.insertAdjacentHTML('beforeend', '<div class="empty">Nobody has reported yet</div>');
@@ -590,10 +464,8 @@ function renderPeople(d) {
       ['Approved by hand', nf.format(p.asks)], ['Lines', `+${nf.format(p.output.added)} / −${nf.format(p.output.removed)}`],
       ...(showCost() ? [['Cost (list price)', usd(p.cost)]] : []),
       ...p.flags.map((f) => ['⚑', esc(f.text)])]));
-    // an old sign-in in a running Claude Code: activity only arrives later, from Puddle's copy of the history
     const ok = r.querySelector('.oldkey');
     if (ok) { ok.onmousemove = (e) => { e.stopPropagation(); showTip(e, `<b>Live activity is delayed</b><div>Claude Code on ${esc(displayName(p).split(' ')[0])}'s Mac was opened before Puddle signed in again. Puddle takes that key back at its next check-in (within 2 minutes).</div>`); }; ok.onmouseleave = hideTip; }
-    // the app, effort and context signs each explain themselves (above the name's own tooltip)
     for (const g of r.querySelectorAll('.sig')) { g.onmousemove = (e) => { e.stopPropagation(); showTip(e, globalThis.signalTip(g.dataset.sig, p)); }; g.onmouseleave = hideTip; }
     hover(r.querySelector('.now-ic'), () => { const st = nowState(p);
       if (!p.now?.everTs && !p.lastActive) return `<b>No data yet</b><div>Puddle isn't sending anything for ${esc(p.email || displayName(p))} yet. Open Puddle on the Mac and sign in with this email.</div>`;
@@ -614,7 +486,6 @@ function renderPeople(d) {
 
 }
 
-// "Needs a look" icons: solid and two-tone like the rest (16×16, white on the coloured tile)
 const FLAG_PATHS = { quiet: '<path d="M13.4 10.4A6.1 6.1 0 0 1 5.6 2.6a6.2 6.2 0 1 0 7.8 7.8z"/>', failures: '<rect x="2.4" y="6.6" width="11.2" height="2.8" rx="1.4" transform="rotate(45 8 8)"/><rect x="2.4" y="6.6" width="11.2" height="2.8" rx="1.4" transform="rotate(-45 8 8)"/>', broken: '<path d="M6.6 2.3a1.6 1.6 0 0 1 2.8 0l5.4 9.6a1.6 1.6 0 0 1-1.4 2.4H2.6a1.6 1.6 0 0 1-1.4-2.4z" opacity=".45"/><rect x="7" y="5" width="2" height="5" rx="1"/><circle cx="8" cy="12" r="1.1"/>', stuck: '<path d="M12.6 6.2A5 5 0 0 0 3.4 6M3.4 9.8a5 5 0 0 0 9.2.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M14 2.6v4.4H9.6z"/><path d="M2 13.4V9h4.4z"/>', hook: '<path d="M10 3.6v5.6a3.6 3.6 0 0 1-7.2 0V8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="3" r="2.2"/>', ratelimit: '<path d="M3.5 1.5h9v2.2c0 1.6-1.4 3-3 4.3 1.6 1.3 3 2.7 3 4.3v2.2h-9v-2.2c0-1.6 1.4-3 3-4.3-1.6-1.3-3-2.7-3-4.3z" opacity=".45"/><path d="M5.4 12.8c0-1.1 1.2-2 2.6-2.8 1.4.8 2.6 1.7 2.6 2.8z"/>', auth: '<circle cx="5" cy="8" r="3.6"/><rect x="7.4" y="6.9" width="7.2" height="2.2" rx="1.1"/><rect x="11.6" y="8" width="2.2" height="3.4" rx="1.1"/>', limit: '<path d="M1.5 11.4a6.5 6.5 0 0 1 13 0z" opacity=".45"/><path d="M8 11.2 11.8 5.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="8" cy="11.2" r="1.9"/>', friction: '<path d="M5.6 1.6c1 0 1.7.8 1.7 1.7v3.4l4.3.8c1 .2 1.7 1.2 1.5 2.2l-.6 3.3c-.2.9-.9 1.5-1.8 1.5H6.6c-.6 0-1.1-.3-1.4-.7l-2.9-3.9a1.2 1.2 0 0 1 1.8-1.6l.5.5V3.3c0-.9.7-1.7 1.6-1.7z"/>', rejects: '<circle cx="8" cy="8" r="6.6" opacity=".45"/><rect x="3.6" y="6.8" width="8.8" height="2.4" rx="1.2"/>', context: '<rect x="2" y="6.8" width="12" height="2.4" rx="1.2"/><path d="M8 1.6v3.2M5.9 3 8 5.1 10.1 3M8 14.4v-3.2M5.9 13 8 10.9l2.1 2.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity=".6"/>', heavy: '<path d="M8 1.6 13.6 7.4H10V14H6V7.4H2.4z"/>', version: '<rect x="2" y="2" width="12" height="12" rx="3" opacity=".45"/><path d="M8 4 11.4 7.6H9.2v4H6.8v-4H4.6z"/>' , oldkey: '<circle cx="5" cy="8" r="3.4"/><rect x="7.5" y="6.9" width="7" height="2.2" rx="1.1"/><rect x="11.6" y="8" width="2" height="3.4" rx="1"/>', offline: '<path d="M8 3a7 7 0 0 1 6.6 4.6l-1.9.7A5 5 0 0 0 3.3 8.3l-1.9-.7A7 7 0 0 1 8 3z"/><path d="M8 7a3.4 3.4 0 0 1 3.2 2.3l-1.9.7a1.4 1.4 0 0 0-2.6 0l-1.9-.7A3.4 3.4 0 0 1 8 7z"/><rect x="1.2" y="7" width="13.6" height="1.8" rx=".9" transform="rotate(45 8 8)"/>', app: '<rect x="7" y="1.5" width="2" height="8" rx="1"/><path d="M4.2 6.6l1.4-1.4L8 7.6l2.4-2.4 1.4 1.4L8 10.4z"/><rect x="2" y="12" width="12" height="2.4" rx="1.2"/>', statusline: '<rect x="1.5" y="10.5" width="13" height="3.5" rx="1.75"/><rect x="1.5" y="2" width="13" height="6.5" rx="1.6" opacity=".45"/>', limits: '<path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 2.4a4.1 4.1 0 1 1 0 8.2 4.1 4.1 0 0 1 0-8.2z" opacity=".45"/><path d="M8 1.5A6.5 6.5 0 0 1 14.5 8h-2.4A4.1 4.1 0 0 0 8 3.9z"/>', titles: '<rect x="2" y="3" width="12" height="2.2" rx="1.1"/><rect x="2" y="7" width="8" height="2.2" rx="1.1" opacity=".45"/><rect x="2" y="11" width="10" height="2.2" rx="1.1" opacity=".45"/>', macerrors: '<path d="M8 1.6l7 12.4H1z"/><rect x="7.1" y="5.6" width="1.8" height="4.6" rx=".9" fill="var(--surface, #fff)"/><circle cx="8" cy="12" r="1" fill="var(--surface, #fff)"/>' , subagents: '<circle cx="8" cy="3.6" r="2.4"/><circle cx="3.4" cy="12" r="2.2" opacity=".55"/><circle cx="12.6" cy="12" r="2.2" opacity=".55"/><rect x="7.1" y="5" width="1.8" height="4" rx=".9"/><path d="M8 8.4 4 10.6M8 8.4l4 2.2" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>', longconvos: '<rect x="2" y="2" width="12" height="2.2" rx="1.1"/><rect x="2" y="5.6" width="12" height="2.2" rx="1.1" opacity=".55"/><rect x="2" y="9.2" width="12" height="2.2" rx="1.1" opacity=".55"/><rect x="2" y="12.8" width="7" height="2.2" rx="1.1" opacity=".35"/>' };
 const FLAG_IC = Object.fromEntries(Object.entries(FLAG_PATHS).map(([k, v]) => [k, `<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true">${v}</svg>`]));
 function renderAttention(team) {
@@ -632,7 +503,6 @@ function renderAttention(team) {
           : '<button data-v="yes" title="Useful — keep it">✓</button><button data-v="no" title="Not an issue — hide for 14 days">✕</button>'}</span></li>`).join('') +
       (items.length > 10 ? `<li class="att-more">+${items.length - 10} more</li>` : '')
     : '<li class="att-ok">✓ Nothing needs a look</li>');
-  // How often the flags were right, from your own ✓ / ✕ ratings
   const fb = D?.team.feedback || [];
   const yes = fb.reduce((a, r) => a + r.yes, 0), no = fb.reduce((a, r) => a + r.no, 0);
   $('#att-acc').innerHTML = (yes + no ? `<b>${Math.round((yes / (yes + no)) * 100)}%</b> rated useful (${yes} of ${yes + no})` : 'Rate each flag ✓ useful or ✕ not an issue to measure how often they are right')
@@ -671,7 +541,6 @@ function renderAdoption(team) {
   }
 }
 
-// Which plugins, connectors and skills, exactly, and who uses each (names from the events, never content)
 function renderNamed(team) {
   const el = $('#named'); if (!el) return;
   const group = (k) => { const m = new Map(); for (const p of team) for (const n of p.featureNames?.[k] || []) { const e = m.get(n.label) || { label: n.label, n: 0, people: [] }; e.n += n.n || 1; e.people.push(p); m.set(n.label, e); } return [...m.values()].sort((a, b) => b.people.length - a.people.length || b.n - a.n); };
@@ -679,12 +548,9 @@ function renderNamed(team) {
   el.innerHTML = section('Plugins', 'plugins') + section('Connectors (MCP)', 'mcp') + section('Skills', 'skills') + section('Sub-agents', 'subagents') || '<p class="muted small">No plugins, connectors or skills seen yet.</p>';
 }
 
-// ---------- map ----------
 const ATLAS = { 110: '/vendor/countries-110m.json', 50: '/vendor/countries-50m.json' };
 const ALIAS = { US: 'United States of America', CD: 'Dem. Rep. Congo', CG: 'Congo', BA: 'Bosnia and Herz.', DO: 'Dominican Rep.', CF: 'Central African Rep.', SS: 'S. Sudan', GQ: 'Eq. Guinea', CI: "Côte d'Ivoire", SZ: 'eSwatini', PS: 'Palestine', EH: 'W. Sahara', SB: 'Solomon Is.', FK: 'Falkland Is.', TT: 'Trinidad and Tobago', MM: 'Myanmar', TR: 'Turkey', CZ: 'Czechia', MK: 'Macedonia', TL: 'Timor-Leste', CY: 'Cyprus' };
 const SMALL = { SG: [103.82, 1.35], HK: [114.17, 22.32], MT: [14.4, 35.9], BH: [50.56, 26.07], MU: [57.55, -20.3], MV: [73.5, 4.2], LI: [9.55, 47.16], MC: [7.42, 43.74], AD: [1.52, 42.51], SM: [12.46, 43.94], BB: [-59.55, 13.19], MO: [113.55, 22.2], GI: [-5.35, 36.14] };
-// Where each common time zone's namesake city is. A pin marks the zone's city,
-// not the person's exact location (someone in Munich shows at Berlin).
 const TZ_LL = {
   'Europe/Berlin': [13.40, 52.52], 'Europe/London': [-0.13, 51.51], 'Europe/Paris': [2.35, 48.86], 'Europe/Madrid': [-3.70, 40.42], 'Europe/Lisbon': [-9.14, 38.72],
   'Europe/Amsterdam': [4.90, 52.37], 'Europe/Brussels': [4.35, 50.85], 'Europe/Zurich': [8.54, 47.37], 'Europe/Vienna': [16.37, 48.21], 'Europe/Rome': [12.50, 41.90],
@@ -708,7 +574,7 @@ async function loadAtlas(res) {
   if (atlases[res] || !window.d3?.geoNaturalEarth1 || !window.topojson) return atlases[res] || null;
   atlasLoading[res] ||= fetch(ATLAS[res]).then((r) => r.json()).then((topo) => {
     const fc = topojson.feature(topo, topo.objects.countries);
-    fc.features = fc.features.filter((f) => f.id !== '010'); // no Antarctica
+    fc.features = fc.features.filter((f) => f.id !== '010');
     return (atlases[res] = { fc, byName: new Map(fc.features.map((f) => [f.properties.name.toLowerCase(), f])) });
   }).catch(() => null);
   return atlasLoading[res];
@@ -719,13 +585,8 @@ const featureIn = (atlas, cc) => {
 };
 const pointFor = (atlas, p) => TZ_LL[p.timezone] || (featureIn(atlas, p.country) ? d3.geoCentroid(featureIn(atlas, p.country)) : SMALL[p.country]) || null;
 
-// Frames the team, not the world: the box around everyone's city, never
-// smaller than about a country, so one person in Berlin shows Germany and a
-// global team shows the band from New York to Tokyo. Pins never overlap: they
-// are nudged apart with a thin line back to their city.
 async function renderMap(list) {
   const el = $('#map');
-  // Redraw only when something visible changed; tooltips read the latest data.
   el._list = list;
   const key = JSON.stringify([el.clientWidth, el.clientHeight, document.documentElement.dataset.theme || '', list.map((p) => [p.user_key, p.timezone, p.country])]);
   if (el._key === key && el.firstChild) return updatePins(el, list);
@@ -753,7 +614,6 @@ async function renderMap(list) {
     if (d) s += `<path class="land${on.has(f) ? ' on' : ''}" d="${d}"/>`;
   }
   s += '</g>';
-  // nodes start at their city and are pushed apart until no pins overlap
   const nodes = pts.map(([p, ll], i) => { const [ax, ay] = proj(ll); return { p, ax, ay, x: ax + Math.cos(i * 2.4) * 0.5, y: ay + Math.sin(i * 2.4) * 0.5 }; });
   const gap = R * 2 + 3;
   for (let it = 0; it < 120; it++) {
@@ -781,8 +641,6 @@ async function renderMap(list) {
   }
 }
 
-// Status and focus change often; geometry rarely. Restyle pins in place so
-// their pulse keeps its rhythm instead of the whole map redrawing.
 function updatePins(el, list) {
   for (const pin of el.querySelectorAll('.pin')) {
     const p = list.find((x) => x.user_key === pin.dataset.u);
@@ -797,22 +655,11 @@ function updatePins(el, list) {
   }
 }
 
-// ---------- activity ----------
 function bucketKeys(ts) {
-  const hourly = ts.granularity === 'hour';
-  const { from, to } = bounds();
-  const d = new Date(from); d.setMinutes(0, 0, 0); if (!hourly) d.setHours(0);
-  const keys = [];
-  while (d.getTime() <= to && keys.length < 400) {
-    keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` + (hourly ? `T${pad(d.getHours())}:00` : ''));
-    if (hourly) d.setHours(d.getHours() + 1); else d.setDate(d.getDate() + 1);
-  }
-  return { keys, hourly };
+  const { len } = bounds(), n = Math.max(1, Math.round(len / (ts.step || DAY)));
+  return { keys: Array.from({ length: n }, (_, i) => i), at: (b) => Math.min(n - 1, b) };
 }
-const keyDate = (k) => new Date(k.length === 10 ? k + 'T00:00' : k);
 
-// ---------- timeline ----------
-// Precision adapts to the window: ~60–120 bars, from 1-minute to 1-day.
 const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
 const tzMin = () => -new Date().getTimezoneOffset();
 function tlWindow() {
@@ -826,7 +673,7 @@ const resLabel = (m) => (m < 60 ? `${m} min` : m < 1440 ? `${m / 60} h` : '1 day
 
 
 function renderTimeline(d) {
-  if (!$('#timeline')) return; // the token chart was cut from the team page
+  if (!$('#timeline')) return;
   const tl = d.tl, win = d.tlWin, el = $('#timeline');
   const bMin = tl.bucketMs / 60_000;
   $('#tl-res').innerHTML = `▮ ${resLabel(bMin)}${tl.fitted || state.fit === false ? ` · <button class="fit-btn" id="tl-fit" title="${tl.fitted ? 'Framed to activity — show the whole period' : 'Frame to activity'}">${tl.fitted ? '⤢ fit' : '⤡ full'}</button>` : ''}`;
@@ -837,12 +684,10 @@ function renderTimeline(d) {
   if (state.zoom) z.querySelector('span').textContent = `${fmtT(state.zoom.from, state.zoom.to - state.zoom.from)}–${fmtT(state.zoom.to, state.zoom.to - state.zoom.from)}`;
   for (const b of document.querySelectorAll('#act-tabs button')) b.setAttribute('aria-pressed', String(!state.zoom && b.dataset.t === state.tab));
 
-  // One series: the team.
   const team = people.length > 1;
   const series = [{ key: 'tok', label: 'Team', color: 'var(--s1)' }];
   $('#tl-title').textContent = SOLO ? 'Your tokens' : 'Team tokens';
 
-  // Full set of bucket starts (empty buckets included) in the window.
   const B = tl.bucketMs, off = tzMin() * 60_000;
   const first = Math.floor((win.from + off) / B) * B - off;
   const keys = [];
@@ -868,7 +713,6 @@ function renderTimeline(d) {
   const bw = Math.max(1, Math.min(18, (iw / keys.length) * 0.74));
 
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Timeline">`;
-  // lane labels + grid
   const clean = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); return [1, 2, 2.5, 5, 10].some((q) => Math.abs(v / e - q) < 1e-9); };
   const nt = [4, 3, 2].find((n) => clean(max / n)) || 3;
   for (let i = 0; i <= nt; i++) {
@@ -878,7 +722,6 @@ function renderTimeline(d) {
   }
   svg += `<text class="lane-l" x="${m.l - 6}" y="${yCum0 + L.cum / 2 + 3}" text-anchor="end">${showCost() ? '$' : 'Σ tok'}</text>`;
 
-  // token bars
   const newest = keys[keys.length - 1];
   keys.forEach((t, i) => {
     const cx = x(t + B / 2);
@@ -896,7 +739,6 @@ function renderTimeline(d) {
     svg += '</g>';
   });
 
-  // cumulative spend
   let run = 0;
   const cumOf = (b) => (showCost() ? b?.cost : (b?.input || 0) + (b?.output || 0) + (b?.cacheRead || 0) + (b?.cacheCreation || 0)) || 0;
   const pts = keys.map((t) => { run += cumOf(by.get(t)); return [Math.min(W - m.r, x(t + B)), run]; });
@@ -909,14 +751,12 @@ function renderTimeline(d) {
     svg += `<text class="cum-v" x="${lx - 4}" y="${yC(run) - 5}" text-anchor="end">${showCost() ? usd(run) : compact(run)}</text>`;
   }
 
-  // now marker
   const now = Date.now();
   if (now >= win.from && now <= win.to + B) {
     const nx = Math.min(x(now), W - m.r);
     svg += `<line class="now-l" x1="${nx}" x2="${nx}" y1="${yTok0}" y2="${yEnd}"/><circle class="now-d" cx="${nx}" cy="${yTok0}" r="3"/>`;
   }
 
-  // time axis: ~6–8 ticks on round local times
   const tickMin = [1, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080].find((q) => span / (q * 60_000) <= 8) || 10080;
   const TB = tickMin * 60_000;
   for (let t = Math.ceil((win.from + off) / TB) * TB - off; t <= win.to; t += TB) {
@@ -926,7 +766,6 @@ function renderTimeline(d) {
   if (!totals.some(Boolean)) svg += `<text x="${m.l + iw / 2}" y="${yTok0 + tokH / 2}" text-anchor="middle" font-size="12">quiet — nothing in this window</text>`;
   el.innerHTML = svg + '</svg>';
 
-  // crosshair + drag-to-zoom
   const xh = el.querySelector('#tl-xh'), sel = el.querySelector('#tl-sel'), svgEl = el.querySelector('svg');
   const px = (e) => { const r = svgEl.getBoundingClientRect(); return ((e.clientX - r.left) / r.width) * W; };
   let drag = null;
@@ -964,35 +803,15 @@ function fmtT(t, span) {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-function renderTools(tools, team) {
-  const mix = {}; for (const p of team) for (const k of CATS) mix[k] = (mix[k] || 0) + (p.mix?.[k] || 0);
-  const tot = CATS.reduce((a, k) => a + mix[k], 0);
-  const top = tools.slice(0, 6), max = Math.max(1, ...top.map((t) => t.calls));
-  $('#tools').innerHTML = (tot ? `<div class="team-mix"><div class="wm big">${CATS.map((k) => (mix[k] ? `<i style="flex:${mix[k]};background:${CAT[k].c}" data-k="${k}"></i>` : '')).join('')}</div>
-    <div class="tm-keys">${CATS.filter((k) => mix[k]).sort((a, b) => mix[b] - mix[a]).slice(0, 4).map((k) => `<span style="--c:${CAT[k].c}">${icon(k)}<b>${Math.round((mix[k] / tot) * 100)}%</b></span>`).join('')}</div></div>` : '') +
-    (top.length ? top.map((t) => { const c = CAT[catOf(t.tool)].c; return `<div class="hb" data-t="${esc(t.tool)}" data-learn="tool:${esc(t.tool)}"><span class="n">${esc(t.tool.replace(/^mcp__/, ''))}</span>
-    <span class="t"><i class="ok" style="width:${((t.calls - t.failures) / max) * 100}%;background:${c}"></i>${t.failures ? `<i class="bad" style="width:${(t.failures / max) * 100}%"></i>` : ''}</span>
-    <span class="c">${compact(t.calls)}</span></div>`; }).join('') : '<div class="empty">—</div>');
-  for (const el of document.querySelectorAll('#tools .hb')) {
-    const t = top.find((x) => x.tool === el.dataset.t);
-    hover(el, `<b>${esc(t.tool)}</b>` + rows([['Kind', CAT[catOf(t.tool)].label], ['Calls', nf.format(t.calls)], ['Failed', nf.format(t.failures)], ['Typical time', dur(t.p50)], ['Slowest 5% take', dur(t.p95)], ['Approved', nf.format(t.accepted)], ['Blocked', nf.format(t.rejected)]]));
-  }
-  for (const el of document.querySelectorAll('#tools .team-mix i')) el.dataset.learn = `cat:${el.dataset.k}`;
-  for (const el of document.querySelectorAll('#tools .team-mix i')) hover(el, () => `<b>${CAT[el.dataset.k].label}</b>` + rows([['Tool calls', nf.format(mix[el.dataset.k])], ['Share', `${Math.round((mix[el.dataset.k] / tot) * 100)}%`]]));
-}
-
-// Plan limits in words for the Limits column's tooltip: used, left, and when the window resets.
 const resetText = (t) => { if (!t) return ''; const d = new Date(t), now = new Date(); const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   return d.toDateString() === now.toDateString() ? `resets ${hm}` : t - now < 7 * 864e5 ? `resets ${d.toLocaleDateString([], { weekday: 'short' })} ${hm}` : `resets ${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}`; };
 const asOf = (t) => { const d = new Date(t); return d.toDateString() === new Date().toDateString() ? `as of ${pad(d.getHours())}:${pad(d.getMinutes())}` : `as of ${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`; };
-// "34% used · 66% left · resets 17:02" (or "· as of 14:10" when the reset time isn't known)
 const usedLeft = (v, reset, ts) => (v == null ? '–' : `${Math.round(v)}% used · ${Math.max(0, 100 - Math.round(v))}% left · ${reset ? resetText(reset) : asOf(ts)}`);
 function renderModels(team) {
   const agg = (fn) => { const m = new Map(); for (const p of team) for (const [k, v] of fn(p)) m.set(k, (m.get(k) || 0) + v); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
   const sections = [
     ['Models', 'tokens', agg((p) => p.models.map((m) => [m.model.replace(/^claude-/, ''), m.tokens]))],
     ['Effort', 'requests', agg((p) => Object.entries(p.effort))],
-    // each app by its name in the agent catalogue ("Codex scripts", "Claude app"), the same app's spellings as one
     ['Client', 'conversations', agg((p) => p.clients.map((c) => [AG()?.client(c.client)?.label || c.client.replace(/^claude-/, ''), c.sessions]))],
   ];
   const hits = team.reduce((a, p) => a + (p.cacheHit != null ? p.cacheHit * p.tokens : 0), 0) / Math.max(1, team.reduce((a, p) => a + (p.cacheHit != null ? p.tokens : 0), 0));
@@ -1004,9 +823,6 @@ function renderModels(team) {
   }).join('') + `<div class="mixbar" data-learn="mix:Cache hits"><div class="lbl"><span>Cache hits</span><span class="muted">${Math.round(hits * 100)}%</span></div><div class="track"><i style="width:${hits * 100}%;background:var(--s3)"></i></div></div>`;
 }
 
-// ---------- tokens per day ----------
-// The same calendar as Me (calendar.js): the range's days full strength, earlier months dimmed when there's room.
-// Hover a day: the team's total, then each person's tokens that day (only what they share).
 function renderCal(d) {
   const ppl = new Map(d.team.people.map((p) => [p.user_key, p])), perDay = new Map();
   for (const r of d.team.dailyByUser || []) { if (!perDay.has(r.day)) perDay.set(r.day, []); perDay.get(r.day).push(r); }
@@ -1021,15 +837,12 @@ function renderCal(d) {
   } });
 }
 
-// ---------- health ----------
 function renderHealth(h) {
   const r = h.recovery || {}, c = r.check;
   const mism = c ? c.tokenMismatch + c.costMismatch + c.promptMismatch : 0;
-  const pill = $('#health-pill');
   const bad = !!r.error, warn = mism > 0;
-  pill.className = 'pill' + (bad ? ' bad' : warn ? ' warn' : '');
-  pill.querySelector('span').textContent = bad ? 'Error' : warn ? `${mism} diff` : (h.bySource?.transcript ? `OK · ↻${h.bySource.transcript}` : 'OK');
-  pill.title = 'Collector, recovery and cross-check';
+  globalThis.PuddleBar?.check(bad ? { level: 'bad', text: 'Error', title: 'Recovering missed data failed: click for the details' }
+    : warn ? { level: 'warn', text: `${mism} differ`, title: `${mism} numbers differ from the session logs: click for the details` } : null);
   $('#hs-grid').innerHTML = [
     ['Up', r.startedAt ? dur(Date.now() - r.startedAt) : '—'], ['Last event', h.lastEvent ? ago(h.lastEvent) + ' ago' : '—'],
     ['Events', `${compact(h.events)} <span class="muted">↻${compact(h.bySource?.transcript || 0)}</span>`], ['Last scan', r.lastRun ? ago(r.lastRun) + ' ago' : '—'],
@@ -1043,43 +856,36 @@ function banner(ok, title, detail) {
   return `<div class="banner ${ok ? 'ok' : 'warn'}" role="status"><span aria-hidden="true">${ok ? '✓' : '⚠'}</span><div><b>${esc(title)}</b>${detail ? esc(detail) : ''}</div></div>`;
 }
 
-// ---------- cards that load when they come near the screen ----------
-// The calendar reads a year of days and code changes a range of edits: worth fetching only once someone scrolls
-// towards them. Once seen, they follow every reload (range change, live update); their numbers join D.team.
 const cards = (() => {
   const LIST = [
     { key: 'calendar', url: '/api/cards/calendar', near: '[data-card="calendar"]', draw: () => renderCal(D) },
     { key: 'lines', url: '/api/cards/lines', near: '[data-card="lines"]', draw: () => renderLines(D) },
-    { key: 'tools', url: '/api/cards/tools', near: '[data-card="mix"]', draw: () => renderTools(D.team.tools || [], D.team.people) },
+    { key: 'prompts', url: '/api/cards/prompts', near: '[data-card="prompts"]', draw: () => renderPrompts(D) },
   ];
-  // a card hidden by its owner (layout.js), or not drawn at all, never loads
-  const shown = (c) => { const el = document.querySelector(c.near); return el && el.getClientRects().length > 0; };
+  const shown = (c) => { const el = document.querySelector(c.near); return el && (el.getClientRects().length > 0 || (el.dataset.empty === '1' && shownCard(c.key))); };
   const got = {}, seen = new Set(), asked = {};
-  // what a card's numbers depend on: the range and the day (a new day starts a new cell)
   const paramsKey = () => `${state.range}|${new Date().toDateString()}`;
-  let newest = 0; // the newest activity row (id) already in the calendar's numbers
+  let newest = 0;
   const fetchCard = async (c) => {
     asked[c.key] = paramsKey();
     const q = new URLSearchParams({ from: bounds().from, to: Date.now() + 60_000, tz: tzMin() });
     const r = await fetch(api(`${c.url}?${q}`)).then((x) => (x.ok ? x.json() : null)).catch(() => null);
     if (!r) return;
     got[c.key] = r;
-    if (c.key === 'calendar') calNewest = Math.max(calNewest, newest); // what's arrived until now is in its numbers
-    if (D) { Object.assign(D.team, r); c.draw(); globalThis.JoulePerf?.card(c.key); }
+    if (c.key === 'calendar') calNewest = Math.max(calNewest, newest);
+    if (D) { Object.assign(D.team, r); c.draw(); globalThis.PuddlePerf?.card(c.key); }
   };
   let calNewest = 0;
   const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => {
     for (const e of es) if (e.isIntersecting) for (const c of LIST) if (!seen.has(c.key) && e.target.matches(c.near) && shown(c)) { seen.add(c.key); fetchCard(c); }
   }, { rootMargin: '800px 0px' }) : null;
-  // also a plain position check on scroll and after each draw: some webviews never report intersections
-  let watching = false; // nothing loads before the owner's layout is in (layout.ready)
+  let watching = false;
   const near = () => { if (!watching) return; for (const c of LIST) if (!seen.has(c.key) && shown(c)) { const el = document.querySelector(c.near); if (el.getBoundingClientRect().top < (innerHeight || 800) + 800) { seen.add(c.key); fetchCard(c); } } };
   const watch = () => {
     watching = true; near();
     for (const sel of new Set(LIST.map((c) => c.near))) { const el = document.querySelector(sel); if (el && io) io.observe(el); }
     addEventListener('scroll', near, { passive: true }); addEventListener('resize', near, { passive: true });
   };
-  // today's cell from the new activity itself: tokens, prompts and steps add up exactly as the calendar counts them
   const dayOf = (ts) => new Date(ts + tzMin() * 60_000).toISOString().slice(0, 10);
   const addToCalendar = (feed) => {
     if (!got.calendar || !D) return;
@@ -1104,28 +910,20 @@ const cards = (() => {
   };
   return {
     data: () => Object.assign({}, ...Object.values(got)),
-    // after a reload: only cards whose range, focus or day changed are fetched again (live activity patches them)
     refresh: () => { near(); for (const c of LIST) if (seen.has(c.key) && shown(c) && asked[c.key] !== paramsKey()) fetchCard(c); },
-    // new activity: the calendar adds it, code changes and tool bars are fetched again only when it has some
     live(feed) {
       for (const r of feed) newest = Math.max(newest, r.id || 0);
       addToCalendar(feed);
     },
-    // with the minute's full load: code changes and tool bars again, if they've been seen (never on every live row)
     stale() { for (const c of LIST.slice(1)) if (seen.has(c.key) && shown(c)) fetchCard(c); },
     seenFeed(feed) { for (const r of feed || []) newest = Math.max(newest, r.id || 0); },
     watch,
   };
 })();
 
-// ---------- load ----------
 let loading = null, again = false;
-// What the page asks for one range (the table and what it draws besides). A range button asks already when the
-// pointer rests on it (prefetch), so by the click the answer is usually there.
-const rangeBounds = (r) => { const now = Date.now(), mid = new Date(); mid.setHours(0, 0, 0, 0); const len = { today: now - mid.getTime(), '7d': 7 * DAY, '30d': 30 * DAY, '90d': 90 * DAY }[r] || 7 * DAY; return { from: now - len, to: now }; };
-const inflight = new Map(); // range → { at, promise }: a prefetched answer the click can take over (5 s)
-// The view for a range. A prefetch (hovering a range) says so: the website answers it only when it has nothing else
-// to do. Switching range cancels the view still loading for the previous one, so the website drops it unworked.
+const rangeBounds = (r) => { const now = Date.now(); return { from: now - (RANGE_LEN[r] || 7 * DAY), to: now }; };
+const inflight = new Map();
 let viewCtl = null;
 function fetchView(r, { prefetch = false } = {}) {
   const hit = inflight.get(r);
@@ -1135,8 +933,8 @@ function fetchView(r, { prefetch = false } = {}) {
   const tq = new URLSearchParams({ from, to: Date.now() + 60_000, tz: tzMin(), parts: 'core', ...(skipped() ? { skip: skipped() } : {}) });
   let signal;
   if (!prefetch) { if (viewCtl && viewCtl.range !== r) viewCtl.abort(); viewCtl = new AbortController(); viewCtl.range = r; signal = viewCtl.signal; }
-  const opt = { signal, ...(prefetch ? { headers: { 'x-joule-prefetch': '1' } } : {}) };
-  const get = (u) => fetch(api(u), opt).then((x) => (x.ok ? x.json() : Promise.reject(new Error(`view ${x.status}`)))); // a busy answer is never kept as data
+  const opt = { signal, ...(prefetch ? { headers: { 'x-puddle-prefetch': '1' } } : {}) };
+  const get = (u) => fetch(api(u), opt).then((x) => (x.ok ? x.json() : Promise.reject(new Error(`view ${x.status}`))));
   return Promise.all([get('/api/board?' + bq), get('/api/team?' + tq)]);
 }
 function prefetch(r) {
@@ -1145,24 +943,20 @@ function prefetch(r) {
   inflight.set(r, { at: Date.now(), promise });
   promise.then(([board, team]) => remember(viewKey(r), { board, team })).catch(() => {});
 }
-// The last answers per view (team or Me, range, person in focus), kept for this window's session
 let shownKey = null;
-const viewKey = (r = state.range) => `joule-view:${state.demo ? 'demo' : TEAM || 'me'}|${r}|${skipped()}`;
+const viewKey = (r = state.range) => `puddle-view:${state.demo ? 'demo' : TEAM || 'me'}|${r}|${skipped()}`;
 function remember(key, v) {
   try {
     sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), ...v }));
-    const keys = Object.keys(sessionStorage).filter((k) => k.startsWith('joule-view:'));
+    const keys = Object.keys(sessionStorage).filter((k) => k.startsWith('puddle-view:'));
     if (keys.length > 12) for (const k of keys.sort((a, b) => (JSON.parse(sessionStorage.getItem(a)).at - JSON.parse(sessionStorage.getItem(b)).at)).slice(0, keys.length - 12)) sessionStorage.removeItem(k);
-  } catch { /* storage full or blocked: just no memory */ }
+  } catch {  }
 }
 function recall(key) { try { const v = JSON.parse(sessionStorage.getItem(key) || 'null'); return v && Date.now() - v.at < 30 * 60_000 ? v : null; } catch { return null; } }
 async function load() {
   if (loading) { again = true; return loading; }
   loading = (async () => {
     try {
-      // the table, headline and flags first, with what the page draws besides them; the calendar and code changes
-      // come from their own requests, once their cards are near the screen (see `cards`)
-      // a view seen before shows at once from memory, then the fresh answer replaces it
       const key = viewKey();
       if (shownKey !== key) {
         const v = recall(key);
@@ -1170,30 +964,27 @@ async function load() {
           D = { board: v.board, team: { ...v.team, ...cards.data() } };
           people = D.team.people.map((u) => ({ ...u, last_active: u.lastActive }));
           for (const b of document.querySelectorAll('#range button')) b.setAttribute('aria-pressed', String(b.dataset.r === state.range));
-          render(); globalThis.JoulePerf?.drawn('team');
+          render(); globalThis.PuddlePerf?.drawn('team');
         }
         shownKey = key;
       }
       const [board, team] = await fetchView(state.range);
       D = { board, team: { ...team, ...cards.data() } };
       lastLoad = Date.now();
-      // the answer includes every event up to its maxId (it may be a shared answer a little older than this load):
-      // live rows that came after it are added again, each once
-      appliedUpTo = team.maxId || Math.max(0, ...(board.feed || []).map((r) => r.id || 0)); applied.clear(); addCounts(liveBuf); // the demo: its feed says
+      appliedUpTo = team.maxId || Math.max(0, ...(board.feed || []).map((r) => r.id || 0)); applied.clear(); addCounts(liveBuf);
       remember(key, { board, team });
       cards.seenFeed(board.feed);
       var flights = Fx.plan(board.feed);
       people = team.people.map((u) => ({ ...u, last_active: u.lastActive }));
       for (const b of document.querySelectorAll('#range button')) b.setAttribute('aria-pressed', String(b.dataset.r === state.range));
-      render();
-      globalThis.JoulePerf?.drawn('team'); globalThis.JouleHeal?.drawn();
+      render(); globalThis.PuddleBar?.fetched('ok');
+      globalThis.PuddlePerf?.drawn('team'); globalThis.PuddleHeal?.drawn();
       Fx.run(flights);
-      cards.refresh(); // the cards already seen get this range's numbers too
+      cards.refresh();
     } catch (e) {
-      if (e?.name === 'AbortError') return; // the range changed while this one loaded: the new one is on its way
+      if (e?.name === 'AbortError') return;
       console.error(e);
-      $('#health-pill').className = 'pill bad';
-      $('#health-pill span').textContent = 'Offline';
+      globalThis.PuddleBar?.fetched(/ 503$/.test(e?.message || '') ? 'busy' : 'fail');
     } finally {
       loading = null;
       if (again) { again = false; load(); }
@@ -1201,9 +992,7 @@ async function load() {
   })();
   return loading;
 }
-// In plain words: the team in a few sentences (collector/insights-text.js, written on the server),
-// each with the numbers behind it on hover. With a person selected: that person's profile.
-const RANGE_WORD = { today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days', '90d': 'Last 90 days' };
+const RANGE_WORD = { '1d': 'Last 24 hours', '7d': 'Last 7 days', '30d': 'Last 30 days', '90d': 'Last 90 days' };
 function renderSummary(d) {
   const el = $('#summary'), items = d.team.summary || [];
   const html = `<header><h2>In plain words</h2><span class="chip">${RANGE_WORD[state.range] || 'This period'}</span></header>
@@ -1212,8 +1001,10 @@ function renderSummary(d) {
   if (el._h !== html) { el._h = html; el.innerHTML = html; }
   for (const li of el.querySelectorAll('li')) { const x = items[+li.dataset.i]; hover(li, `<b>Why</b><div>${esc(x.evidence || '')}</div>`); }
 }
-// What the team is on: each person's latest conversation, newest first (only what each person shares); a row opens
-// it on its project's page, "See all" every conversation a page at a time (work.html)
+function renderPrompts(d) {
+  const ppl = new Map(d.team.people.map((p) => [p.user_key, p]));
+  globalThis.mountPrompts?.(document.querySelector('[data-card="prompts"]'), d.team.lastDay, { hover, rows, who: (k) => displayName(ppl.get(k)), colorOf, learn: 'card:prompts' });
+}
 function renderProjects(d) {
   const list = d.team.recent || [], card = $('#projects-card');
   card.hidden = !list.length;
@@ -1221,34 +1012,29 @@ function renderProjects(d) {
   const ppl = new Map(d.team.people.map((p) => [p.user_key, p]));
   const scope = state.demo ? 'demo=1&' : TEAM ? `team=${encodeURIComponent(TEAM)}&` : '';
   const html = globalThis.recentHTML(list, { avatar: (k) => (ppl.get(k) ? avatar(ppl.get(k), 'sm') : ''), nameOf: (k) => displayName(ppl.get(k)), time: (m) => `${hmm(m)} h`, ago,
-    href: (c) => `/project?${scope}p=${encodeURIComponent(c.project)}&range=${encodeURIComponent(state.range)}&c=${encodeURIComponent(c.session_id)}`,
-    seeAll: `/work?${scope}range=${encodeURIComponent(state.range)}` });
+    href: (c) => `/project?${scope}p=${encodeURIComponent(c.project)}&range=${encodeURIComponent(state.range)}&c=${encodeURIComponent(c.session_id)}&${fromHere()}`,
+    seeAll: `/work?${scope}range=${encodeURIComponent(state.range)}&${fromHere()}` });
   if ($('#projects')._h !== html) { $('#projects')._h = html; $('#projects').innerHTML = html; }
 }
-// Code changes: lines added/removed per project over the range (lines.js)
 function renderLines(d) {
   const card = $('#lines-card');
-  if (!card || !d.team.codeLines) return; // shown until its numbers arrive (so it's seen and loads), hidden if there are none
+  if (!card || !d.team.codeLines) return;
   const list = d.team.codeLines;
-  card.hidden = !list.length;
-  if (list.length) globalThis.mountCodeLines($('#lines'), list, { from: d.team.lane?.from ?? Date.now() - 7 * 864e5, now: d.team.now || Date.now(), hover, rows });
+  card.hidden = !list.length; card.dataset.empty = list.length ? '' : '1';
+  if (list.length) globalThis.mountCodeLines($('#lines'), list, { from: bounds().from, now: Date.now(), hover, rows });
 }
 function render() {
-  if (!D) return;
+  if (!D || document.body.classList.contains('leaving')) return;
+  $('#grid')?.setAttribute('aria-busy', 'false');
   if (shownCard('recent')) renderProjects(D);
   if (shownCard('lines')) renderLines(D);
   if (shownCard('kpis')) renderKpis(D);
-  renderPeople(D); // the table, and the cards drawn from the same people (each only when shown)
-  if (shownCard('mix')) { renderTools(D.team.tools || [], D.team.people); $('#mix-title').textContent = SOLO ? 'What you do' : 'What the team does'; }
+  renderPeople(D);
   if (shownCard('models')) renderModels(D.team.people);
   if (shownCard('calendar')) renderCal(D);
   renderHealth(D.board.health);
 }
 
-// ---------- effects ----------
-// Every new event becomes a small token that flies from the person who caused
-// it to the number it changes. The sound plays when it lands, the target
-// glows, a "+value" floats up and the number rolls. Calm, but you see why.
 const Fx = (() => {
   let seen = null, filterKey = '', floors = null;
   const hold = new Set();
@@ -1256,9 +1042,9 @@ const Fx = (() => {
   const T = {
     prompt:  { ic: '✎', c: 'var(--s5)', to: () => tile('time'), sound: 'prompt', rolls: ['time'] },
     coin:    { ic: '⚡︎', c: 'var(--s1)', to: () => tile('time'), sound: 'request', rolls: ['time'] },
-    tool:    { ic: '⚙︎', c: 'var(--s3)', to: (f) => document.querySelector(`#tools .hb[data-t="${CSS.escape(f.tool || '')}"]`) || $('.mix'), sound: 'tool', rolls: [] },
+    tool:    { ic: '⚙︎', c: 'var(--s3)', to: (f) => { const p = people.find((x) => x.email === f.email); return (p && document.querySelector(`.brow.body[data-u="${CSS.escape(p.user_key)}"]`)) || $('.people-card'); }, sound: 'tool', rolls: [] },
     fail:    { ic: '✕', c: 'var(--critical)', to: (f) => { const p = people.find((x) => x.email === f.email); return (p && document.querySelector(`.brow.body[data-u="${CSS.escape(p.user_key)}"]`)) || $('.people-card'); }, sound: 'fail', rolls: [], shake: true },
-    recover: { ic: '↻', c: 'var(--s1)', to: () => $('#health-pill'), sound: 'recover', rolls: [] },
+    recover: { ic: '↻', c: 'var(--s1)', to: () => $('#status'), sound: 'recover', rolls: [] },
   };
   const inView = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth; };
   const center = (el) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
@@ -1267,15 +1053,13 @@ const Fx = (() => {
     const p = people.find((x) => x.email === email);
     const u = p ? CSS.escape(p.user_key) : null;
     const cands = u ? [`.brow.body[data-u="${u}"] .now-ic`, `#map .pin[data-u="${u}"]`] : [];
-    for (const c of [...cands, '#live']) { const el = document.querySelector(c); if (inView(el)) return el; }
+    for (const c of [...cands, '#status']) { const el = document.querySelector(c); if (inView(el)) return el; }
     return null;
   }
 
-  // Turn a batch of new events into a few readable flights.
   function plan(feed) {
     const top = feed[0]?.id ?? 0;
     if (seen == null) { seen = top; return []; }
-    // only what just happened: after a hidden tab or a pause, no backlog parade
     const fresh = feed.filter((e) => e.id > seen && Date.now() - e.ts < 20_000).sort((a, b) => a.id - b.id);
     seen = Math.max(seen, top);
     if (!fresh.length) return [];
@@ -1298,14 +1082,9 @@ const Fx = (() => {
 
   function run(flights) {
     flights.forEach((f, i) => setTimeout(() => fly(f), i * 230));
-    // Safety net: whatever happens, numbers settle.
     setTimeout(() => { for (const id of [...hold]) { hold.delete(id); rollKpi(id); } }, flights.length * 230 + 1400);
   }
 
-  // A token is thrown from the person to the number it changes: it follows a
-  // gravity arc, tilts with its direction of travel, squashes as it lands, and
-  // the target wobbles from the impact. Power saving or a hidden tab: no flight,
-  // the number just updates.
   let flying = 0;
   function fly(f) {
     const t = T[f.type], dst = t.to(f);
@@ -1320,8 +1099,6 @@ const Fx = (() => {
     document.body.appendChild(tok);
     flying++;
     bump(src, 0.05);
-    // Keep the whole token on screen: a low arc that never rises above the
-    // viewport, and every point clamped inside it.
     const tr = tok.getBoundingClientRect(), mx = tr.width / 2 + 8, my = tr.height / 2 + 8;
     const clampX = (x) => Math.max(mx, Math.min(innerWidth - mx, x)), clampY = (y) => Math.max(my, Math.min(innerHeight - my, y));
     const a0 = [clampX(x0), clampY(y0)], a1 = [clampX(x1), clampY(y1)];
@@ -1330,18 +1107,16 @@ const Fx = (() => {
     const last = path.length - 1;
     const frames = path.map(([x, y, tilt], i) => {
       const u = i / last;
-      const sc = u < 0.1 ? 0.85 + (u / 0.1) * 0.15 : 1 - Math.max(0, u - 0.88) * 0.8; // ease out of the source, settle into the target
+      const sc = u < 0.1 ? 0.85 + (u / 0.1) * 0.15 : 1 - Math.max(0, u - 0.88) * 0.8;
       return { transform: `translate(${clampX(x)}px,${clampY(y)}px) translate(-50%,-50%) rotate(${tilt}deg) scale(${sc})`, opacity: u < 0.08 ? u / 0.08 : 1 };
     });
-    frames.push({ transform: `translate(${a1[0]}px,${a1[1]}px) translate(-50%,-50%) scale(1.03, .94)`, opacity: 0 }); // a soft touch-down
+    frames.push({ transform: `translate(${a1[0]}px,${a1[1]}px) translate(-50%,-50%) scale(1.03, .94)`, opacity: 0 });
     const anim = tok.animate(frames, { duration: Math.min(950, 520 + dist * 0.35), easing: 'linear' });
     anim.onfinish = anim.oncancel = () => { tok.remove(); flying--; land(f, dst); };
   }
 
-  // Wobble from an impact: a damped oscillation of scale (or sideways for a shake).
   function bump(el, strength = 0.03, axis = 'scale') {
     if (!Motion.any()) return;
-    // one soft swing and a small follow-through, not a jelly wobble
     const k = Motion.impulse({ amplitude: strength, frequency: axis === 'scale' ? 3.2 : 7, decay: 11, duration: 420 });
     el.animate(k.map((v) => ({ transform: axis === 'scale' ? `scale(${1 + v})` : `translateX(${v * 40}px)` })), { duration: 420, easing: 'linear', composite: 'add' });
   }
@@ -1358,7 +1133,7 @@ const Fx = (() => {
     dst.classList.add('fx-hit');
     setTimeout(() => dst.classList.remove('fx-hit'), 1100);
     if (t.shake) bump(dst, 0.04, 'x'); else if (dst.matches('.kpi')) bump(dst, 0.01);
-    if (f.type !== 'recover' && f.type !== 'coin') floatText(dst, f.type === 'tool' ? '✓' : f.label, t.c); // tokens aren't what the time tile counts
+    if (f.type !== 'recover' && f.type !== 'coin') floatText(dst, f.type === 'tool' ? '✓' : f.label, t.c);
   }
 
   function floatText(el, text, color) {
@@ -1367,16 +1142,13 @@ const Fx = (() => {
     const n = document.createElement('div');
     n.className = 'fx-float'; n.textContent = text; n.style.color = color;
     document.body.appendChild(n);
-    // stay on screen even for things at the very top or right edge
     const w = n.offsetWidth;
     n.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width - 28))}px`;
     n.style.top = `${Math.max(24, Math.min(innerHeight - 24, r.top + 10))}px`;
-    // floats up like something light: fast start, slowing as it fades
     n.animate([{ transform: 'translateY(4px)', opacity: 0 }, { transform: 'translateY(-3px)', opacity: 1, offset: 0.2 }, { transform: 'translateY(-16px)', opacity: 0 }],
       { duration: 1300, easing: 'cubic-bezier(.15,.7,.3,1)' }).onfinish = () => n.remove();
   }
 
-  // Gentle celebration when spend or tokens cross a round number.
   function milestones(tiles) {
     const key = state.range;
     const stepOf = { spend: (v) => (v < 10 ? 1 : v < 100 ? 5 : v < 1000 ? 25 : 100), tokens: (v) => (v < 2e7 ? 1e6 : v < 2e8 ? 1e7 : 1e8) };
@@ -1400,7 +1172,6 @@ const Fx = (() => {
     floatText(el, `★ ${label}`, 'var(--s4)');
   }
 
-  // Tab in the background: nothing is drawn, but you still hear who is working.
   function hear(feed) {
     const flights = plan(feed);
     hold.clear();
@@ -1410,7 +1181,6 @@ const Fx = (() => {
   return { plan, run, hear, milestones, holding: (id) => hold.has(id), reset() { seen = null; floors = null; hold.clear(); } };
 })();
 
-// ---------- controls ----------
 const soundBtn = $('#sound-btn');
 soundBtn.setAttribute('aria-pressed', String(Sound.on));
 soundBtn.onclick = () => {
@@ -1419,37 +1189,39 @@ soundBtn.onclick = () => {
   soundBtn.title = Sound.on ? 'Sounds on' : 'Sounds off';
   if (Sound.on) { Sound.play('toggle'); soundBtn.classList.remove('ping'); void soundBtn.offsetWidth; soundBtn.classList.add('ping'); }
 };
-for (const b of document.querySelectorAll('#range button')) b.onclick = () => { state.range = b.dataset.r; state.tab = 'range'; state.zoom = null; save(); load(); };
+for (const b of document.querySelectorAll('#range button')) b.onclick = () => {
+  state.range = b.dataset.r; state.tab = 'range'; state.zoom = null; save();
+  for (const x of document.querySelectorAll('#range button')) x.setAttribute('aria-pressed', String(x === b));
+  load();
+};
 for (const b of document.querySelectorAll('#range button')) { b.addEventListener('pointerenter', () => prefetch(b.dataset.r)); b.addEventListener('pointerdown', () => prefetch(b.dataset.r)); }
 for (const b of document.querySelectorAll('#act-tabs button')) b.onclick = () => { state.tab = b.dataset.t; state.zoom = null; save(); load(); };
 $('#tl-zoom')?.addEventListener('click', () => { state.zoom = null; save(); load(); });
-// Learn mode: explanations under every tooltip, for people new to Claude Code.
 const learnBtn = $('#learn-btn');
 function applyLearn() { document.body.classList.toggle('learn', LEARN.on); learnBtn.setAttribute('aria-pressed', String(LEARN.on)); learnBtn.title = LEARN.on ? 'Learn mode on: hover anything for an explanation' : 'Learn mode: explain everything'; }
 learnBtn.onclick = () => { LEARN.on = !LEARN.on; applyLearn(); hideTip(); Sound.play('toggle'); toast(LEARN.on ? '? Learn mode on — hover anything to see what it means' : 'Learn mode off'); };
 applyLearn();
 
-// Theme: theme.js (the one switch for every screen) owns the button; here only the toast, sound and a redraw
-globalThis.JouleTheme?.onChange((t, from) => {
+globalThis.PuddleTheme?.onChange((t, from) => {
   if (from === 'user') { Sound.play('toggle'); toast(t === 'auto' ? 'Theme follows your system' : `${t[0].toUpperCase()}${t.slice(1)} theme`); }
   if (D) render();
 });
-// the developer tools menu ("…") exists only on the local development dashboard; the website has Settings instead
 const menu = $('#menu'), menuBtn = $('#menu-btn');
 if (menuBtn) menuBtn.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; menuBtn.setAttribute('aria-expanded', String(!menu.hidden)); };
 document.addEventListener('click', () => { if (menu) { menu.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); } });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (menu) menu.hidden = true; hideTip(); } });
-$('#health-pill').onclick = () => $('#health-sheet').showModal();
-for (const b of document.querySelectorAll('[data-close]')) b.onclick = () => b.closest('dialog').close();
-for (const d of document.querySelectorAll('dialog')) d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
+$('#status').onclick = () => { $('#hs-now').textContent = $('#status').title; $('#health-sheet').showModal(); };
 for (const b of document.querySelectorAll('[data-act]')) b.onclick = () => act(b.dataset.act);
 
+function fromHere() {
+  const t = document.title.includes(' · ') ? document.title.split(' · ')[0] : null;
+  return globalThis.PuddleBar?.from(state.demo ? 'the demo team' : globalThis.PuddleBar?.teamName(TEAM) || t || 'the team') || ''; }
 const post = (url, body) => fetch(api(url), { method: 'POST', headers: { 'content-type': 'application/json', 'x-claude-usage': '1' }, body: JSON.stringify(body || {}) })
   .then(async (r) => ({ ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) }));
 function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3200); }
 
 async function act(a) {
-  if (menu) menu.hidden = true; // the "…" menu exists only on the local development dashboard
+  if (menu) menu.hidden = true;
   if (a === 'cost') {
     state.cost = !showCost(); save();
         toast(showCost() ? '$ Cost estimates on (API list prices)' : 'Cost hidden — behaviour only');
@@ -1482,13 +1254,8 @@ $('#reset-form').onsubmit = async (e) => {
 };
 
 
-// ---------- live wiring ----------
-// New activity, before the numbers are fetched again: each person's "right now" (their latest prompt, model call or
-// tool, as the table works it out) and the flying tokens for what just happened.
-// Live rows add to what's on screen exactly (each event once, by its id): prompts, model calls, tokens, cost, tool
-// calls by kind. Everything else (active time, medians, flags) comes with the next full load, at most a minute away.
-const applied = new Set(); let appliedUpTo = 0; // event ids already in the numbers (up to the last answer's maxId)
-const liveBuf = []; // recent rows: re-applied on top of an answer that was worked out before they arrived
+const applied = new Set(); let appliedUpTo = 0;
+const liveBuf = [];
 function addCounts(rows) {
   let changed = false;
   for (const r of rows) {
@@ -1511,7 +1278,6 @@ function liveRows(feed) {
     if (['user_prompt', 'api_request', 'tool_result', 'tool_decision'].includes(r.name) && !(n.lastTs >= r.ts)) { n.lastTs = r.ts; n.last = r.name; changed = true; }
     if (['tool_result', 'tool_decision'].includes(r.name) && !(n.toolTs >= r.ts)) { n.toolTs = r.ts; n.tool = r.tool_name; n.doing = catOf(r.tool_name); changed = true; }
     if (r.name === 'user_prompt' && !(n.promptTs >= r.ts)) { n.promptTs = r.ts; changed = true; }
-    // the conversation it belongs to, for the agents running now (agentsNow)
     if (r.session_id && ['user_prompt', 'api_request', 'tool_result', 'tool_decision'].includes(r.name)) {
       const list = (n.sessions ||= []), x = list.find((y) => y.id === r.session_id);
       if (x) { if (!(x.ts >= r.ts)) { x.ts = r.ts; changed = true; } if (r.client && !x.client) x.client = AG()?.canonicalClient(r.client) || r.client; }
@@ -1525,15 +1291,12 @@ function liveRows(feed) {
   cards.live(feed);
 }
 let es = null, stale = false, live = false;
-// a full load at most once a minute while updates keep coming (every update used to load everything again)
 let lastLoad = 0, soonTimer = null;
 function soon() {
   if (soonTimer) return;
   const wait = Math.max(0, lastLoad + 60_000 - Date.now());
   soonTimer = setTimeout(() => { soonTimer = null; load(); cards.stale(); }, wait);
 }
-// Hidden tab: don't render or animate anything; only fetch the latest events
-// (when sounds are on) so you can still hear activity. Catch up on return.
 async function listen() {
   stale = true;
   if (!Sound.on) return;
@@ -1544,35 +1307,32 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && st
 function connect() {
   es?.close();
   es = new EventSource(api('/api/stream'));
-  es.onopen = () => { live = true; $('#live').classList.add('on'); };
-  // a refused stream (a 429 while the website was being replaced) isn't retried by the browser: reopened here
-  es.onerror = () => { live = false; $('#live').classList.remove('on'); if (es.readyState === EventSource.CLOSED) setTimeout(connect, 5000 + Math.random() * 10_000); };
-  // An update carries the view's new activity: shown at once (who's doing what, the flying tokens, the sounds),
-  // then the numbers are fetched again (one fetch at a time: one that arrives meanwhile asks for one more after it)
-  es.addEventListener('version', (ev) => globalThis.JouleHeal?.saw(ev.data)); // a newer site: the page refreshes itself when idle
+  globalThis.PuddleBar?.stream(false);
+  es.onopen = () => { live = true; globalThis.PuddleBar?.stream(true); };
+  es.onerror = () => { live = false; globalThis.PuddleBar?.stream(false); if (es.readyState === EventSource.CLOSED) setTimeout(connect, 5000 + Math.random() * 10_000); };
+  es.addEventListener('version', (ev) => globalThis.PuddleHeal?.saw(ev.data));
   es.addEventListener('update', (ev) => {
-    let d = null; try { d = JSON.parse(ev.data); } catch { /* an older service sends a timestamp only */ }
-    if (d?.version) globalThis.JouleHeal?.saw(d.version);
+    let d = null; try { d = JSON.parse(ev.data); } catch {  }
+    if (d?.version) globalThis.PuddleHeal?.saw(d.version);
     const feed = Array.isArray(d?.feed) ? d.feed : null;
     if (document.hidden) { stale = true; if (feed && Sound.on) Fx.hear(feed); else if (!feed) listen(); return; }
-    globalThis.JoulePerf?.live('arrived');
+    globalThis.PuddlePerf?.live('arrived');
     if (feed?.length && D) liveRows(feed);
-    globalThis.JoulePerf?.live('drawn');
-    soon(); // the numbers that can't be added up live: a full load, at most once a minute
+    globalThis.PuddlePerf?.live('drawn');
+    soon();
   });
 }
 function applyDemo() {
   document.body.classList.toggle('demo', !!state.demo);
-  $('#demo-toggle')?.setAttribute('aria-checked', String(!!state.demo)); // the dev-only menu's copy
+  $('#demo-toggle')?.setAttribute('aria-checked', String(!!state.demo));
   $('#demo-btn')?.setAttribute('aria-pressed', String(!!state.demo));
-  // the team card's title says whose data this is: the demo team while it's on, your team's name otherwise
   const h = document.querySelector('h2[data-learn="card:team"]');
   if (h) { h.dataset.name ??= h.textContent; h.textContent = state.demo ? 'Demo team' : h.dataset.name; }
 }
 applyDemo();
-layout.ready.then(() => cards.watch()); // the cards that load themselves wait for the owner's layout: a hidden one never loads
+layout.ready.then(() => cards.watch());
 connect();
-// the live stream brings updates; polling only while it's down (a minute apart)
+addEventListener('puddle:online', () => load());
 setInterval(() => { if (!document.hidden && !live) load(); }, 60_000);
 let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(render, 120); });
 load();

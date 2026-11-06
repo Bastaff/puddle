@@ -32,7 +32,6 @@ test('scan: finds accounts, projects and loose spots on a fake machine', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'joule-scan-'));
   try {
     const now = Date.now(), t = (min) => new Date(now - min * 60_000).toISOString();
-    // a work repo and a personal folder
     const repo = path.join(home, 'code', 'web');
     fs.mkdirSync(repo, { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: repo });
@@ -40,7 +39,6 @@ test('scan: finds accounts, projects and loose spots on a fake machine', () => {
     const side = path.join(home, 'side');
     fs.mkdirSync(side);
 
-    // Claude Code: Team account, one session in the repo (desktop app logs a scratch folder first)
     put(path.join(home, '.claude.json'), { oauthAccount: { organizationUuid: 'org-acme', organizationType: 'claude_team', organizationName: 'Acme', emailAddress: 'dev@acme.io' } });
     put(path.join(home, '.claude/projects/x/s1.jsonl'), jsonl([
       { type: 'attachment', cwd: path.join(home, 'Library/Application Support/Claude/scratch'), sessionId: 's1', timestamp: t(30) },
@@ -50,14 +48,12 @@ test('scan: finds accounts, projects and loose spots on a fake machine', () => {
       { type: 'user', cwd: repo, sessionId: 's1', timestamp: t(27), message: { role: 'user', content: '<command-name>/clear</command-name>' } },
       { type: 'user', cwd: repo, sessionId: 's1', timestamp: t(26), message: { role: 'user', content: [{ type: 'text', text: 'and add a test' }] } },
     ]));
-    // a second Claude config dir, signed into a personal Max plan (the documented work/personal pattern)
     put(path.join(home, '.claude-personal/.claude.json'), { oauthAccount: { organizationUuid: 'org-me', organizationType: 'claude_max' } });
     put(path.join(home, '.claude-personal/projects/y/s2.jsonl'), jsonl([
       { type: 'user', cwd: side, sessionId: 's2', timestamp: t(20), message: { role: 'user', content: 'hello' } },
       { type: 'assistant', cwd: side, sessionId: 's2', timestamp: t(19), message: { content: [] } },
       { type: 'ai-title', sessionId: 's2', aiTitle: 'Saying hello' },
     ]));
-    // the desktop app, switched to a second org, ran a session there: it must not count for the CLI's Team org
     put(path.join(desktopAppDir(home), 'claude-code-sessions/acct-1/org-acme/local_a.json'), { cliSessionId: 's1', cwd: repo, title: 'Fix  the login\nbug' });
     put(path.join(desktopAppDir(home), 'claude-code-sessions/acct-1/org-second/local_b.json'), { cliSessionId: 's3', cwd: side, title: 'The app\'s name' });
     put(path.join(home, '.claude/projects/z/s3.jsonl'), jsonl([
@@ -65,7 +61,6 @@ test('scan: finds accounts, projects and loose spots on a fake machine', () => {
       { type: 'ai-title', sessionId: 's3', aiTitle: 'Trip planning' },
       { type: 'custom-title', sessionId: 's3', customTitle: 'Lisbon trip' },
     ]));
-    // Codex: personal Plus, one quick chat in the app
     put(path.join(home, '.codex/auth.json'), { auth_mode: 'chatgpt', tokens: { account_id: 'acc-me', id_token: jwt({ 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus', organizations: [{ is_default: true, title: 'Personal' }] } }) } });
     const chat = path.join(home, 'Documents/Codex/2026-10-01/what-is-a-monad');
     put(path.join(home, '.codex/sessions/2026/10/01/rollout-1.jsonl'), jsonl([
@@ -97,10 +92,46 @@ test('scan: finds accounts, projects and loose spots on a fake machine', () => {
     assert.equal(r.places.at(-1).key, 'chats', 'loose spots come last');
 
     assert.equal(r.sessions.length, 4);
-    // every conversation gets the name people see: given by hand, else the app's, else Claude Code's own, Codex's thread name
     const title = Object.fromEntries(r.sessions.map((x) => [x.id, x.title]));
     assert.deepEqual(title, { s1: 'Fix the login bug', s2: 'Saying hello', s3: 'Lisbon trip', 'cx-1': 'Monads explained' });
     for (const s of r.sessions) assert.ok(Object.values(s.byDay).reduce((a, b) => a + b, 0) > 0);
     assert.ok(r.tools.every((t) => t.found));
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('scan: a growing log is read on between scans, and gives what reading it whole gives', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'puddle-scan-grow-'));
+  try {
+    const now = Date.now(), t = (min) => new Date(now - min * 60_000).toISOString();
+    put(path.join(home, '.claude.json'), { oauthAccount: { organizationUuid: 'o1', organizationType: 'claude_max' } });
+    const a = path.join(home, 'code', 'a'), b = path.join(home, 'code', 'b');
+    fs.mkdirSync(a, { recursive: true }); fs.mkdirSync(b, { recursive: true });
+    const rows = [];
+    for (let i = 0; i < 60; i++) {
+      rows.push({ type: 'user', sessionId: 'g1', cwd: i % 3 ? a : b, entrypoint: 'cli', timestamp: t(300 - i), message: { role: 'user', content: `prompt ${i}` } });
+      rows.push({ type: 'assistant', sessionId: 'g1', cwd: i % 3 ? a : b, timestamp: t(300 - i), message: { content: [] } });
+      if (i === 20) rows.push({ type: 'ai-title', aiTitle: 'First name' });
+      if (i === 50) rows.push({ type: 'custom-title', customTitle: 'Given name' });
+    }
+    const codexRows = [{ type: 'session_meta', timestamp: t(200), payload: { id: 'cx1', cwd: a, originator: 'codex_cli_rs' } }];
+    for (let i = 0; i < 30; i++) codexRows.push({ type: 'event_msg', timestamp: t(199 - i), payload: { type: i % 5 ? 'agent_message' : 'user_message' } });
+    const text = jsonl(rows), ctext = jsonl(codexRows);
+    const file = path.join(home, '.claude', 'projects', 'x', 'g1.jsonl'), cfile = path.join(home, '.codex', 'sessions', '2026', 'rollout-cx1.jsonl');
+    const pick = (r) => JSON.parse(JSON.stringify({ sessions: r.sessions, places: r.places, totals: r.totals, daily: r.daily }));
+    const grown = { scan };
+    let x = 7;
+    for (let at = 0, ct = 0; at < text.length || ct < ctext.length;) {
+      const n = 1 + ((x = (x * 48271) % 2147483647) % 900);
+      put(file, text.slice(0, (at += n))); put(cfile, ctext.slice(0, (ct += n)));
+      grown.scan({ home, env: { PATH: '' }, now });
+    }
+    const got = pick(grown.scan({ home, env: { PATH: '' }, now }));
+    for (const f of [file, cfile]) { fs.copyFileSync(f, f + '.new'); fs.renameSync(f + '.new', f); }
+    const whole = pick(scan({ home, env: { PATH: '' }, now }));
+    assert.deepEqual(got, whole);
+    const g1 = whole.sessions.find((s) => s.id === 'g1');
+    assert.equal(g1.title, 'Given name');
+    assert.equal(g1.prompts, 60);
+    assert.ok(whole.sessions.some((s) => s.id === 'cx1'));
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });

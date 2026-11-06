@@ -1,9 +1,3 @@
-// Codex's history (~/.codex/sessions/**/rollout-*.jsonl) as the same events Claude Code's history gives: prompts
-// (their length), model calls (tokens, how full the context was, effort), steps (kind, failed or not, how long),
-// lines added/removed, and when the conversation had to be squeezed. Text is only ever measured: no prompt, answer,
-// command, output or diff is kept.
-
-// One rollout → telemetry-shaped rows. Keys are the rollout's own record order (stable as Codex appends).
 export function parseRollout(text) {
   const out = { session: null, prompts: [], reqs: [], steps: [], lines: [], compactions: [] };
   let model = null, effort = null, n = -1;
@@ -22,7 +16,7 @@ export function parseRollout(text) {
     if (r.type === 'turn_context') { model = p.model || p.collaboration_mode?.settings?.model || model; effort = p.effort || p.reasoning_effort || effort; continue; }
     if (r.type === 'response_item' && p.type === 'message' && p.role === 'user') {
       const t = (p.content || []).filter((b) => b?.type === 'input_text' && !String(b.text || '').startsWith('<')).map((b) => b.text).join('');
-      if (t) userMsgs.push({ key: key('up'), ts, length: t.length, id: `${sid}:p${n}` }); // older logs give a prompt no id: a stable one
+      if (t) userMsgs.push({ key: key('up'), ts, length: t.length, id: `${sid}:p${n}` });
       continue;
     }
     if (r.type === 'event_msg' && p.type === 'token_count' && p.info?.last_token_usage) {
@@ -38,7 +32,6 @@ export function parseRollout(text) {
         const t = (it.content || []).filter((b) => b?.type === 'text').map((b) => b.text || '').join('');
         if (t) userItems.push({ key: key('up'), ts, length: t.length, id: it.id || null });
       } else if (it.type === 'CommandExecution') {
-        // the kind of command (reading, searching, running), never the command itself
         const kind = it.parsed_cmd?.[0]?.type;
         const tool = kind === 'read' ? 'Read' : kind === 'search' ? 'Grep' : kind === 'list_files' ? 'Glob' : 'Bash';
         out.steps.push({ key: key('tr'), ts, tool, ok: it.exit_code === 0 || (it.exit_code == null && it.status === 'completed'), ms });
@@ -55,9 +48,7 @@ export function parseRollout(text) {
       } else if (it.type === 'ContextCompaction') out.compactions.push({ key: key('cc'), ts });
     }
   }
-  // newer Codex logs each prompt as a finished UserMessage; older ones only as a user message item
   out.prompts = userItems.length ? userItems : userMsgs;
-  // each call answers the newest prompt before it in this file (Codex never says which: 21 Oct 2026)
   const ps = out.prompts.filter((p) => p.id).sort((a, b) => a.ts - b.ts);
   for (const r of out.reqs) { let best = null; for (const p of ps) { if (p.ts > r.ts) break; best = p.id; } r.prompt_id = best; delete r.line; }
   return out;

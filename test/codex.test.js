@@ -7,8 +7,6 @@ import { parseLogs, scrubPayload } from '../collector/otlp.js';
 import { openDb } from '../collector/db.js';
 import { makeQueries } from '../collector/queries.js';
 
-// Shaped like the payload Codex 0.159 sent in the phase-0 capture
-// (event names, common attributes), with usage fields from codex-rs/otel.
 const s = (key, v) => ({ key, value: { stringValue: String(v) } });
 const common = [s('conversation.id', 'conv-1'), s('app.version', '0.159.2'), s('auth_mode', 'Chatgpt'), s('originator', 'codex_exec'),
   s('user.account_id', 'ws-acme'), s('user.email', 'dev@example.com'), s('terminal.type', 'xterm'), s('model', 'gpt-6-luna')];
@@ -68,6 +66,6 @@ test('Codex usage shows up in the dashboard queries next to Claude Code', async 
     const me = team.people[0];
     assert.equal(me.prompts, 1); assert.equal(me.tools, 2); assert.equal(me.toolFail, 1);
     assert.equal(me.mix.run, 1); assert.equal(me.mix.mcp, 1);
-    assert.equal(store.db.prepare(`SELECT COUNT(*) n FROM events WHERE agent = 'codex'`).get().n, 8); // 11 events, 3 are not usage
+    assert.equal(store.db.prepare(`SELECT COUNT(*) n FROM events WHERE agent = 'codex'`).get().n, 8);
   } finally { store.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -1,18 +1,11 @@
-// Puddle's Claude Code status line. Claude Code hands every status line its session JSON on stdin; Puddle
-// keeps only the plan limits (5-hour and weekly % used, a Claude apps gateway's spend limit, when each resets,
-// and which windows came) and the conversation's name (session_name: the one set with /rename, otherwise the
-// generated title) with its session id, and passes them to Puddle on this Mac. With limits it also reads which
-// Claude account this is (the organization id in Claude Code's own config), so the reading lands on the right
-// account. What you see is your own status line if you had one (run with the same input, its output
-// unchanged), otherwise a short "5h 42% · week 18%". Never blocks Claude Code; nothing else is read.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
 
-const DIR = process.env.JOULE_DIR || path.join(os.homedir(), '.joule');
-const PORT = Number(process.env.JOULE_PORT) || 4600;
+const DIR = process.env.PUDDLE_DIR || process.env.JOULE_DIR || (fs.existsSync(path.join(os.homedir(), '.puddle')) || !fs.existsSync(path.join(os.homedir(), '.joule')) ? path.join(os.homedir(), '.puddle') : path.join(os.homedir(), '.joule'));
+const PORT = Number(process.env.PUDDLE_PORT || process.env.JOULE_PORT) || 4600;
 
 let input = '';
 process.stdin.on('data', (d) => (input += d));
@@ -21,7 +14,6 @@ process.stdin.on('end', () => {
   try { s = JSON.parse(input); } catch {}
   const rl = s.rate_limits || {};
   const num = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
-  // a gateway's spend limit is the month window (Claude Code has no other); its period rides along for the label
   const plan = { agent: 'claude-code', five_pct: num(rl.five_hour?.used_percentage), five_reset: rl.five_hour?.resets_at ?? null,
     week_pct: num(rl.seven_day?.used_percentage), week_reset: rl.seven_day?.resets_at ?? null,
     month_pct: num(rl.spend_limit?.used_percentage), month_reset: rl.spend_limit?.resets_at ?? null };
@@ -41,7 +33,6 @@ process.stdin.on('end', () => {
   Promise.all(jobs).then((codes) => process.exit(codes.find((c) => typeof c === 'number') || 0));
 });
 
-// the Claude account Claude Code runs as: its config dir's .claude.json (CLAUDE_CONFIG_DIR, else ~/.claude.json)
 function account() {
   const dir = process.env.CLAUDE_CONFIG_DIR, home = os.homedir();
   for (const f of dir ? [path.join(dir, '.claude.json')] : [path.join(home, '.claude.json'), path.join(home, '.claude', '.claude.json')]) {
@@ -50,25 +41,21 @@ function account() {
   return null;
 }
 
-// which windows came and with which fields ("five_hour:resets_at,used_percentage seven_day:used_percentage"):
-// names only, so a missing reset time or week can be told from Puddle's log
 function shape(rl) {
   return Object.keys(rl).sort().map((k) => `${k}:${rl[k] && typeof rl[k] === 'object' ? Object.keys(rl[k]).sort().join(',') : typeof rl[k]}`).join(' ').slice(0, 300);
 }
 
-// to Puddle on this Mac; gives up after 250 ms (Puddle not running is fine)
 function send(reading) {
   return new Promise((done) => {
     const body = JSON.stringify(reading);
     const req = http.request({ host: '127.0.0.1', port: PORT, path: '/api/statusline', method: 'POST', timeout: 250,
-      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'x-joule': '1' } }, (res) => { res.resume(); res.on('end', () => done()); });
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'x-puddle': '1' } }, (res) => { res.resume(); res.on('end', () => done()); });
     req.on('timeout', () => { req.destroy(); done(); });
     req.on('error', () => done());
     req.end(body);
   });
 }
 
-// your previous status line, with the same input; its output and exit code pass through
 function runPrev(file, stdin) {
   return new Promise((done) => {
     const child = spawn('/bin/sh', [file], { stdio: ['pipe', 'inherit', 'inherit'] });

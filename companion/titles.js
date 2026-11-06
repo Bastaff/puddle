@@ -1,7 +1,3 @@
-// What Puddle's Claude Code status line sees per session: the conversation's name (`session_name`: the name set
-// with /rename or -n, otherwise the title Claude Code generated; never a prompt, never the default "my-app-3f"
-// display name, which Claude Code doesn't put there) and when it last ran (which clients run the status line at
-// all). ~/.joule/titles.json, kept 30 days, at most 3000 sessions.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -20,13 +16,12 @@ export function makeTitles({ dir, now = () => Date.now() }) {
     try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, JSON.stringify(state), { mode: 0o600 }); } catch {}
   };
   return {
-    // a status line call for this session; false when the id isn't one
     saw(sessionId, name) {
       if (!ID.test(String(sessionId || ''))) return false;
       const e = state[sessionId] || {}, t = clean(name);
       e.seen = now(); if (t) e.name = t;
       state[sessionId] = e;
-      if (!timer) { timer = setTimeout(save, 5000); timer.unref?.(); } // a status line runs often: written at most every 5 s
+      if (!timer) { timer = setTimeout(save, 5000); timer.unref?.(); }
       return true;
     },
     names: () => new Map(Object.entries(state).filter(([, e]) => e.name).map(([k, e]) => [k, e.name])),

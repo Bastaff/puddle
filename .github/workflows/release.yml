@@ -1,6 +1,7 @@
 name: release
 
-# A tag like v0.0.2 builds Puddle.app from exactly that commit and attaches it to the release, with its checksum.
+# A tag like v0.0.2 tests and builds Puddle.app from exactly that commit and creates its release (notes from
+# CHANGELOG.md). The app attached is the signed, notarized one (see the last step).
 # The website it signs in to comes from the repository variable PUDDLE_SERVICE_URLS (without it, the build works on
 # the Mac only).
 
@@ -19,8 +20,8 @@ jobs:
     needs: test
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22.13'
           cache: npm
@@ -29,11 +30,31 @@ jobs:
       - run: node scripts/fetch-node.mjs
       - name: The tag matches package.json
         run: test "v$(node scripts/version.mjs)" = "$GITHUB_REF_NAME"
+      # Signed with Puddle's Developer ID when the repository has its secrets (APPLE_CERTIFICATE: the .p12, base64;
+      # APPLE_CERTIFICATE_PASSWORD; APPLE_SIGNING_IDENTITY: the certificate's name): Tauri imports it into a
+      # throwaway keychain. Without them (a fork) the build is signed ad hoc, as before.
+      - name: Signing, when the secrets are there
+        env:
+          HAS_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        run: echo "SIGN=$HAS_CERT" >> "$GITHUB_ENV"
       - name: Build Puddle.app
         working-directory: companion-app
         env:
           PUDDLE_SERVICE_URLS: ${{ vars.PUDDLE_SERVICE_URLS }}
-        run: npx --yes @tauri-apps/cli@2.12.1 build --bundles app
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          # only when there's a certificate: Tauri tries to import one whenever APPLE_CERTIFICATE is set, even empty
+          if [ "$SIGN" = true ]; then export APPLE_CERTIFICATE="$CERT" APPLE_CERTIFICATE_PASSWORD="$CERT_PASSWORD" APPLE_SIGNING_IDENTITY="$IDENTITY"; fi
+          npx --yes @tauri-apps/cli@2.12.1 build --bundles app
+      - name: Notarize it (a download opens with no warning)
+        if: env.SIGN == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: scripts/notarize-app.sh companion-app/target/release/bundle/macos/Puddle.app
       - name: Zip it, with its checksum
         run: |
           APP=companion-app/target/release/bundle/macos/Puddle.app
@@ -43,9 +64,13 @@ jobs:
           ditto -c -k --norsrc --noextattr --keepParent "$APP" "$ZIP"
           shasum -a 256 "$ZIP" > "$ZIP.sha256"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
-      - name: Attach to the release
+      # The release gets its notes here. Its app is the signed, notarized one published to puddle.rip, attached by the
+      # maintainer (gh release upload <tag> Puddle-<version>-mac-arm64.zip …): the same file everywhere, and the
+      # signing key never leaves the maintainer's Mac. This build proves the public code builds; it's attached only
+      # when signed here (the repository's Apple secrets), never ad hoc, so nobody downloads a copy macOS warns about.
+      - name: The release, and this build if it's signed
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Puddle ${GITHUB_REF_NAME#v}" --notes-file CHANGELOG.md
-          gh release upload "$GITHUB_REF_NAME" "$ZIP" "$ZIP.sha256" --clobber
+          if [ "$SIGN" = true ]; then gh release upload "$GITHUB_REF_NAME" "$ZIP" "$ZIP.sha256" --clobber; fi

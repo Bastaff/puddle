@@ -1,11 +1,6 @@
-// Every conversation of a team (or Me) over the range, a page at a time (/work?team=…&range=…&page=…&sort=…): who, its
-// title, its project, how long it was worked on, its tokens and what it spent; newest first or ordered by any of those;
-// narrowed to one person or one project. A row opens the conversation on its project's page. Each column says what it
-// counts on hover. Numbers only: never a prompt, never code.
 const q = new URLSearchParams(location.search), team = q.get('team'), demo = q.get('demo') === '1';
 const RANGES = { '1d': ['1D', 1], '7d': ['7D', 7], '30d': ['30D', 30], '90d': ['90D', 90] };
 let range = RANGES[q.get('range')] ? q.get('range') : '7d', page = Math.max(1, Number(q.get('page')) || 1);
-// the orders, as the API knows them; and what each column counts (the header's hover)
 const SORTS = { recent: 'Newest', time: 'Longest worked', tokens: 'Most tokens', cost: 'Most spent' };
 const HINT = {
   time: 'Time worked: the minutes the agent was busy in this conversation (gaps over 5 minutes left out)',
@@ -27,11 +22,10 @@ const initials = (u) => nameOf(u).split(/\s+/).map((w) => w[0]).join('').slice(0
 const avatar = (u) => `<i class="prj-av" style="background:${colorOf(u)}" title="${esc(nameOf(u))}">${esc(initials(u))}</i>`;
 const short = (n) => (/^[a-z0-9.-]+\.[a-z]+\/.+\/.+/i.test(n) ? n.split('/').pop() : n);
 const scope = demo ? 'demo=1&' : team ? `team=${encodeURIComponent(team)}&` : '';
-const back = () => (demo ? '/?demo=1' : team ? `/?team=${encodeURIComponent(team)}` : '/');
+globalThis.PuddleBar?.title('Conversations');
 const untitled = (c) => (c.last ? `Conversation on ${new Date(c.last).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}` : 'Conversation');
-const open = (c) => `/project?${scope}p=${encodeURIComponent(c.project)}&range=${range}&c=${encodeURIComponent(c.session_id)}`;
+const open = (c) => `/project?${scope}p=${encodeURIComponent(c.project)}&range=${range}&c=${encodeURIComponent(c.session_id)}&${globalThis.PuddleBar?.from('Conversations') || ''}`;
 
-// the page's state lives in its address: a link, reload or back lands on the same page of the same list
 function remember() {
   const u = new URL(location.href);
   for (const [key, v] of [['range', range], ['page', page > 1 ? page : ''], ['person', person], ['project', project], ['sort', sort === 'recent' ? '' : sort]]) if (v) u.searchParams.set(key, v); else u.searchParams.delete(key);
@@ -43,7 +37,7 @@ function draw() {
   const opt = (v, label, on) => `<option value="${esc(v)}"${on ? ' selected' : ''}>${esc(label)}</option>`;
   el.innerHTML = `
     <section class="card prj-head">
-      <a class="pv-back" href="${back()}">‹ Back to ${team || demo ? 'the team' : 'Me'}</a>
+      
       <div class="prj-title"><h1>Conversations</h1><span class="muted">${esc(SORTS[sort].toLowerCase())} first</span>
         <div class="prj-ranges" role="group" aria-label="Range">${Object.entries(RANGES).map(([key, [l]]) => `<button type="button" data-r="${key}" aria-pressed="${key === range}">${l}</button>`).join('')}</div></div>
       <div class="cv-filters">
@@ -72,22 +66,20 @@ function draw() {
   sel('#w-person', (v) => { person = v; }); sel('#w-project', (v) => { project = v; }); sel('#w-sort', (v) => { sort = v; });
 }
 
-// one request at a time: a newer click cancels the one still on its way (an older answer never draws over a newer one,
-// and the site stops working out a page nobody waits for)
 let asking = null;
 async function load() {
   remember();
-  const days = RANGES[range][1], to = Date.now() + 60_000, from = range === '1d' ? new Date().setHours(0, 0, 0, 0) : Date.now() - days * 864e5;
+  const days = RANGES[range][1], to = Date.now() + 60_000, from = Date.now() - days * 864e5;
   const qs = new URLSearchParams({ from, to, tz: -new Date().getTimezoneOffset(), page, ...(sort !== 'recent' ? { sort } : {}), ...(person ? { person } : {}), ...(project ? { project } : {}), ...(team ? { team } : {}), ...(demo ? { demo: '1' } : {}) });
   asking?.abort();
   const mine = asking = new AbortController();
   const r = await fetch(`/api/work?${qs}`, { signal: mine.signal }).catch(() => null);
   if (mine.signal.aborted) return;
-  if (!r || !r.ok) { el.innerHTML = `<section class="card"><a class="pv-back" href="${back()}">‹ Back</a><p class="muted">Could not load the conversations.</p></section>`; return; }
+  if (!r || !r.ok) { el.innerHTML = `<section class="card"><p class="muted">Could not load the conversations.</p></section>`; return; }
   const fresh = await r.json().catch(() => null);
   if (mine.signal.aborted || !fresh) return;
   data = fresh;
   page = data.page;
-  draw(); globalThis.JouleHeal?.drawn();
+  draw(); globalThis.PuddleHeal?.drawn();
 }
 load();

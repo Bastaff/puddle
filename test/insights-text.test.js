@@ -1,5 +1,3 @@
-// The plain-language view: each person's one-line profile and the team's sentences come from fixed
-// rules over the numbers. Checked on hand-made people and on the demo team's personas.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -20,11 +18,9 @@ test('a profile reads like a sentence, with the numbers behind every part', () =
   assert.equal(p.line, 'evening & weekend operator · long hands-off runs · 99% auto-approved');
   assert.match(p.facts.find((f) => f.key === 'style').evidence, /78% of active time outside 08–19/);
   assert.match(p.facts.find((f) => f.key === 'delegates').evidence, /38 of 200 prompts ran 20\+ steps/);
-  // office hours, mostly questions, near a limit, a warning in words
   const q = profile(person({ hours: { total: 600, day: 560, evening: 30, night: 0, weekend: 10, outside: 40 }, mix: { edit: 70, read: 30 },
     runs: { prompts: 50, long: 1, chat: 30, smooth: 50, longest: 21 }, week_pct: 91, flags: [{ kind: 'stuck', level: 'warn', text: 'Stuck retrying Bash' }] }));
   assert.equal(q.line, 'daytime builder · mostly asks questions · 99% auto-approved · near weekly limit · stuck on a tool');
-  // too little to say anything about habits
   assert.equal(profile(person({ prompts: 2 })).line, 'light use this period');
 });
 
@@ -49,7 +45,6 @@ test('the team summary never ranks people and only names them to act on somethin
 
 test('demo personas come out as the people they were written to be', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu-insights-'));
-  // a fixed moment, as in demo.test: the personas are written against a weekday afternoon, not whatever now is
   const now = Date.parse('2026-10-14T13:00:00Z');
   const demo = makeDemo(path.join(dir, 'demo.db'), { now: () => now });
   try {

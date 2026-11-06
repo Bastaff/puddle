@@ -1,15 +1,12 @@
-// Me's rhythm and forecasts at fixed moments: your own past, summed, nothing learned.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rhythm, activeSegments, mergeRuns } from '../collector/forecast.js';
 
-const TZ = 120; // Berlin summer time
-const at = (iso) => Date.parse(iso) - TZ * 60_000; // local wall time → ms
-// one session: an event every 2 minutes from start to end (local wall times)
+const TZ = 120;
+const at = (iso) => Date.parse(iso) - TZ * 60_000;
 const work = (day, from, to, session = day + from) => {
   const rows = []; for (let t = at(`${day}T${from}:00Z`); t <= at(`${day}T${to}:00Z`); t += 120_000) rows.push({ session, ts: t }); return rows;
 };
-// 8 weeks of weekdays, 09:00–11:00, starting Monday 2026-08-17
 function history(weeks = 8) {
   const rows = [];
   for (let d = 0; d < weeks * 7; d++) {
@@ -18,7 +15,7 @@ function history(weeks = 8) {
   }
   return rows;
 }
-const WED_10 = at('2026-10-14T10:00:00Z'); // Wednesday of week 9, an hour into the usual 2
+const WED_10 = at('2026-10-14T10:00:00Z');
 
 test('active time: gaps over 5 minutes are pauses, parallel sessions count once', () => {
   const rows = [...work('2026-10-01', '09:00', '09:30', 'a'), ...work('2026-10-01', '09:10', '09:40', 'b'), { session: 'a', ts: at('2026-10-01T10:00:00Z') }];
@@ -60,8 +57,7 @@ test('ahead or quieter than usual, and honest when history is short', () => {
 
 test('from the stored runs (no events read): the same rhythm as from the events', () => {
   const rows = [...history(8), ...work('2026-10-12', '09:00', '11:00'), ...work('2026-10-13', '09:00', '10:30', 'x'), ...work('2026-10-13', '10:00', '11:00', 'y'), ...work('2026-10-14', '09:00', '10:00')];
-  rows.push({ session: 'lone', ts: at('2026-10-13T15:00:00Z') }); // a single step is no active time either way
-  // runs as collector/rollup.js stores them: per conversation, steps under 5 minutes apart
+  rows.push({ session: 'lone', ts: at('2026-10-13T15:00:00Z') });
   const runs = [], by = new Map();
   for (const r of rows) (by.get(r.session) || by.set(r.session, []).get(r.session)).push(r.ts);
   for (const ts of by.values()) { ts.sort((a, b) => a - b); let s0 = ts[0]; for (let i = 1; i <= ts.length; i++) if (i === ts.length || ts[i] - ts[i - 1] >= 5 * 60_000) { runs.push({ start: s0, end: ts[i - 1] }); s0 = ts[i]; } }
