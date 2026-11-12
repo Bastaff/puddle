@@ -243,6 +243,9 @@ fn on_action(app: &AppHandle) -> impl Fn(&tauri::Url) -> bool + Send + 'static {
             "uninstall" => { set_open_at_login(&app, false); app.exit(0) }
             "close_main" => if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); },
             "hide_popover" => if let Some(w) = app.get_webview_window("popover") { let _ = w.hide(); },
+            t if t.starts_with("popover_h_") => if let (Some(w), Ok(h)) = (app.get_webview_window("popover"), t[10..].parse::<f64>()) {
+                let _ = w.set_size(tauri::LogicalSize::new(POPOVER.0, h.clamp(240.0, 900.0)));
+            },
             _ => eprintln!("puddle: unknown action"),
         });
         false
@@ -442,6 +445,28 @@ fn any_window_visible(app: &AppHandle) -> bool {
 }
 
 struct UpdateMenu { menu: Menu<tauri::Wry>, item: MenuItem<tauri::Wry>, shown: std::sync::Mutex<Option<String>> }
+struct CheckItem(MenuItem<tauri::Wry>);
+
+fn check_now(app: &AppHandle) {
+    let Some(item) = app.try_state::<CheckItem>() else { return };
+    let _ = item.0.set_text("Checking for updates…");
+    let _ = item.0.set_enabled(false);
+    let h = app.clone();
+    std::thread::spawn(move || {
+        let v = local("POST", "/api/update/check").and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok());
+        let say = match &v {
+            None => "Couldn't check: try again later".to_string(),
+            Some(v) if v["available"].as_bool().unwrap_or(false) => format!("Puddle {} is ready to install", v["latest"].as_str().unwrap_or("")),
+            Some(v) => format!("Up to date (Puddle {})", v["current"].as_str().unwrap_or("")),
+        };
+        if v.as_ref().is_some_and(|v| v["available"].as_bool().unwrap_or(false)) { check_update(&h); }
+        let h2 = h.clone();
+        let _ = h.run_on_main_thread(move || if let Some(item) = h2.try_state::<CheckItem>() { let _ = item.0.set_text(&say); let _ = item.0.set_enabled(true); });
+        std::thread::sleep(Duration::from_secs(20));
+        let h3 = h.clone();
+        let _ = h.run_on_main_thread(move || if let Some(item) = h3.try_state::<CheckItem>() { let _ = item.0.set_text("Check for updates…"); });
+    });
+}
 
 fn check_update(app: &AppHandle) {
     let Some(v) = local("GET", "/api/update").and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok()) else { return };
@@ -487,6 +512,8 @@ fn main() {
             let me = MenuItem::with_id(app, "me", "Me", true, None::<&str>)?;
             let dash = MenuItem::with_id(app, "dash", "Team dashboard", true, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "Settings…", true, None::<&str>)?;
+            let check = MenuItem::with_id(app, "check", "Check for updates…", true, None::<&str>)?;
+            app.manage(CheckItem(check.clone()));
             let at_login = {
                 use tauri_plugin_autostart::ManagerExt;
                 app.autolaunch().is_enabled().unwrap_or(false)
@@ -498,9 +525,9 @@ fn main() {
             let sep = PredefinedMenuItem::separator(app)?;
             let menu = if DEV {
                 let reset = MenuItem::with_id(app, "reset", "Reset onboarding (dev)", true, None::<&str>)?;
-                Menu::with_items(app, &[&me, &dash, &sep, &open, &login, &reset, &PredefinedMenuItem::separator(app)?, &remove, &quit])?
+                Menu::with_items(app, &[&me, &dash, &sep, &open, &check, &login, &reset, &PredefinedMenuItem::separator(app)?, &remove, &quit])?
             } else {
-                Menu::with_items(app, &[&me, &dash, &sep, &open, &login, &PredefinedMenuItem::separator(app)?, &remove, &quit])?
+                Menu::with_items(app, &[&me, &dash, &sep, &open, &check, &login, &PredefinedMenuItem::separator(app)?, &remove, &quit])?
             };
             let upd = MenuItem::with_id(app, "update", "Install update…", true, None::<&str>)?;
             app.manage(UpdateMenu { menu: menu.clone(), item: upd, shown: std::sync::Mutex::new(None) });
@@ -518,6 +545,7 @@ fn main() {
                         "me" => open_me(&app),
                         "dash" => open_dashboard(app.clone()),
                         "open" => open_settings(app.clone()),
+                        "check" => check_now(&app),
                         "reset" => show_main(&app, "/?app&reset"),
                         "remove" => show_main(&app, "/?app&remove"),
                         "login" => {

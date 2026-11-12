@@ -22,8 +22,6 @@ const clock = (min) => `${Math.floor(min / 60)}:${String(Math.round(min % 60)).p
 const COPY_IC = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="3"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>';
 const R = (x, y, w, h, c, r = 2, o = 1) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" style="fill:${c}"${o < 1 ? ` opacity="${o}"` : ''}/>`;
 const MINI = {
-  tiles: [0, 34, 68].map((x, i) => R(x, 6, 30, 32, 'var(--raised)', 5) + R(x + 5, 12, 12, 3, 'var(--axis)', 1.5) + R(x + 5, 19, 16, 6, 'var(--ink)', 2)
-    + `<path d="M${x + 4} 34 l5 -3 l5 2 l5 -5 l5 3 l4 -2" fill="none" style="stroke:${['var(--s2)', 'var(--s1)', 'var(--s7)'][i]}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`).join(''),
   today: Array.from({ length: 12 }, (_, i) => { const u = [4, 3, 2, 3, 8, 12, 14, 13, 15, 12, 9, 6][i], t = [0, 0, 0, 0, 0, 16, 26, 10, 22, 30, 0, 0][i];
     return R(4 + i * 8, 40 - u * 1.6, 6, u * 1.6, 'var(--axis)', 1.5, .6) + (t ? R(5.5 + i * 8, 40 - t, 3, t, 'var(--s2)', 1.5) : ''); }).join('') + '<path d="M78 6 V40" style="stroke:var(--ink)" stroke-width="1.2" stroke-dasharray="2 2"/>',
   work: [[86, 'var(--k-run)'], [44, 'var(--k-mcp)'], [22, 'var(--k-read)'], [14, 'var(--k-edit)']].map(([w, c], i) => R(4, 5 + i * 9.5, 92, 5, 'var(--wash)', 2.5) + R(4, 5 + i * 9.5, w, 5, c, 2.5)).join(''),
@@ -48,7 +46,7 @@ async function shareLive() {
   const on = () => SHARE_PARTS.filter((x) => show?.[x.id]);
   const preview = (url) => `<div class="sh-preview${url ? ' on' : ''}">
       <div class="sh-addr"><span class="sh-live" aria-hidden="true"></span><span>${url ? esc(url.replace(/^https?:\/\//, '')) : 'Your page, once you share'}</span></div>
-      ${!show || show.tiles ? `<div class="sh-nums"><div><small>Today</small><b>${today}<small>h</small></b></div><div><small>This week</small><b>${week}<small>h</small></b></div></div>` : ''}
+      ${!show || show.today ? `<div class="sh-nums"><div><small>Today</small><b>${today}<small>h</small></b></div><div><small>This week</small><b>${week}<small>h</small></b></div></div>` : ''}
       <div class="sh-what">${show ? (on().length ? `${on().length} ${on().length === 1 ? 'card' : 'cards'} from Me, live` : 'Nothing yet: pick what it shows below') : 'Your time with agents, live'}</div>
     </div>`;
   const lineField = () => (show ? `<label class="sh-line"><h3>Under your name</h3>
@@ -71,7 +69,7 @@ async function shareLive() {
   };
   document.body.append(d); d.showModal(); d.addEventListener('close', () => d.remove());
   const call = async (action, body = {}) => { const r = await fetch('/api/share', action ? { method: 'POST', headers: { 'content-type': 'application/json', 'x-puddle': '1' }, body: JSON.stringify({ action, ...body }) } : {}); const j = await r.json().catch(() => ({}));
-    if (r.ok) { show = j.show && 'tiles' in j.show ? j.show : null; url = j.url || null; line = typeof j.line === 'string' ? j.line : ''; auto = j.auto || ''; return action === 'line' ? null : paint(j); } return paint(null, r.status === 401 ? 'signin' : j.error || 'Something went wrong.'); };
+    if (r.ok) { show = j.show && 'today' in j.show ? j.show : null; url = j.url || null; line = typeof j.line === 'string' ? j.line : ''; auto = j.auto || ''; return action === 'line' ? null : paint(j); } return paint(null, r.status === 401 ? 'signin' : j.error || 'Something went wrong.'); };
   let url = null;
   d.addEventListener('click', async (e) => {
     if (e.target.closest('.sh-eye')) return;

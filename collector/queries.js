@@ -2,6 +2,7 @@ import { rollupColumns, promptColumns, taskColumns, TASK_NAMES, QUARTER, ACTIVE_
 import { contextWindow } from './pricing.js';
 import * as R from './flags.js';
 import { asSql } from './sql.js';
+import { WINNERS, daySplit, doneDays, pqReady, TOOL_CATEGORY, CATEGORIES } from './fast.js';
 import { activeSegments, rhythm } from './forecast.js';
 import { profile, teamSummary, commonFacts } from './insights-text.js';
 import { planLabel, planTool, isRun, canonicalClient } from './agents.js';
@@ -61,15 +62,7 @@ export function parseFilters(q) {
   };
 }
 
-export const TOOL_CATEGORY = `CASE
-  WHEN tool_name IN ('Read', 'Grep', 'Glob', 'LS', 'NotebookRead') THEN 'read'
-  WHEN tool_name IN ('Edit', 'Write', 'MultiEdit', 'NotebookEdit') THEN 'edit'
-  WHEN tool_name IN ('Bash', 'BashOutput', 'KillShell', 'KillBash', 'Monitor') THEN 'run'
-  WHEN tool_name IN ('WebFetch', 'WebSearch') THEN 'web'
-  WHEN tool_name IN ('Agent', 'Task', 'Skill', 'Workflow') THEN 'agent'
-  WHEN substr(tool_name, 1, 5) = 'mcp__' OR tool_name = 'mcp_tool' THEN 'mcp'
-  ELSE 'other' END`;
-export const CATEGORIES = ['read', 'edit', 'run', 'web', 'agent', 'mcp', 'other'];
+export { TOOL_CATEGORY, CATEGORIES };
 const LANE_BUCKETS = 48;
 const TOK = `COALESCE(input_tokens,0) + COALESCE(output_tokens,0) + COALESCE(cache_read,0) + COALESCE(cache_creation,0)`;
 
@@ -145,17 +138,19 @@ export const RUNS_PROJECT = 'Scripted runs';
 const ID_LIKE = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/i;
 const projectOf = (rows) => ((m) => (sid) => m.get(sid) || null)(new Map(rows.map((r) => [r.session_id, r.repo || r.folder || null])));
 
-export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => false } = {}) {
+export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => false, fast = (label) => WINNERS.has(label) } = {}) {
   const S = asSql(db);
   const { all, one } = S;
-  const workCache = new Map();
+  const workCache = new Map(), pluginCache = new Map();
   const where = (f, alias, opts = {}) => baseWhere(f, alias, opts, S);
   const n = S.count, J = S.json, T = S.time;
   const RC = rollupColumns(S, 'x');
   const RAW = [...Object.entries(RC.dims).filter(([k]) => k !== 'bucket').map(([k, v]) => `${v} AS ${k}`), 'x.ts AS ts', 'x.ts AS max_ts',
     ...Object.entries(RC.measures).filter(([k]) => k !== 'min_ts' && k !== 'max_ts').map(([k, [v]]) => `${v} AS ${k}`)].join(', ');
-  const SUMMED = [...Object.keys(RC.dims).filter((k) => k !== 'bucket').map((k) => `r.${k}`), 'r.bucket AS ts', 'r.max_ts',
-    ...Object.keys(RC.measures).filter((k) => k !== 'min_ts' && k !== 'max_ts').map((k) => `r.${k}`)].join(', ');
+  const summed = (a) => [...Object.keys(RC.dims).filter((k) => k !== 'bucket').map((k) => `${a}.${k}`), `${a}.bucket AS ts`, `${a}.max_ts`,
+    ...Object.keys(RC.measures).filter((k) => k !== 'min_ts' && k !== 'max_ts').map((k) => `${a}.${k}`)].join(', ');
+  const SUMMED = summed('r');
+  const withDays = async (f, labels) => (rollup() && labels.some((l) => fast(l)) && f.members?.length ? { ...f, done: await doneDays(S, f.members, f.from, f.to) } : f);
   const PC = promptColumns(S, 'x');
   const RAWP = [...Object.entries(PC.dims).filter(([k]) => k !== 'bucket').map(([k, v]) => `${v} AS ${k}`), ...Object.entries(PC.measures).map(([k, [v]]) => `${v} AS ${k}`)].join(', ');
   const SUMP = [...Object.keys(PC.dims).filter((k) => k !== 'bucket').map((k) => `r.${k}`), ...Object.keys(PC.measures).map((k) => `r.${k}`)].join(', ');
@@ -226,13 +221,23 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     return sessionTimes(null, new Map([['all', rows]]));
   };
 
-  const source = (f, { names = null, model = false, cuts = [], rawOnly = false } = {}) => {
+  const source = (f, { names = null, model = false, cuts = [], rawOnly = false, day = null, edges = false } = {}) => {
     const nm = (a) => (names ? ` AND ${a}.name IN (${names.map((x) => `'${x}'`).join(', ')})` : '');
     const raw = (from, to) => { const w = where({ ...f, from, to }, 'x', { model }); return { sql: `SELECT ${RAW} FROM events x WHERE ${w.sql}${nm('x')}`, params: w.params }; };
     const A = Math.ceil(f.from / QUARTER) * QUARTER, B = Math.floor(f.to / QUARTER) * QUARTER;
     if (rawOnly || !rollup() || A >= B) { const r = raw(f.from, f.to); return { sql: `(${r.sql}) e`, params: r.params }; }
+    const dz = day && fast(day) && !cuts.length ? daySplit(f, f.done, A, B) : null;
+    if (dz) {
+      const head = raw(f.from, A), tail = raw(B, f.to);
+      const wq = where({ ...f, from: A, to: B }, 'r', { model, ts: 'bucket', org: 'r.org' }), wd = where({ ...f, from: A, to: B }, 'd', { model, ts: 'bucket', org: 'd.org' });
+      const runs = (a, list) => (list.length ? `(${list.map(() => `(${a}.user_key = ? AND ${a}.bucket >= ? AND ${a}.bucket < ?)`).join(' OR ')})` : '1 = 0');
+      return { sql: `(${head.sql} UNION ALL ${tail.sql} UNION ALL SELECT ${SUMMED} FROM event_rollup r WHERE ${wq.sql} AND ${runs('r', dz.quarter)}${nm('r')}
+        UNION ALL SELECT ${summed('d')} FROM event_day d WHERE ${wd.sql} AND ${runs('d', dz.day)}${nm('d')}) e`,
+      params: [...head.params, ...tail.params, ...wq.params, ...dz.quarter.flat(), ...wd.params, ...dz.day.flat()] };
+    }
     const split = [...new Set(cuts.filter((t) => t % QUARTER !== 0).map((t) => t - (t % QUARTER)))].filter((q) => q >= A && q < B).sort((a, b) => a - b);
     const parts = [raw(f.from, A), ...split.map((q) => raw(q, q + QUARTER)), raw(B, f.to)];
+    if (edges) return { sql: `(${parts.map((x) => x.sql).join(' UNION ALL ')}) e`, params: parts.flatMap((x) => x.params), A, B, split };
     const w = where({ ...f, from: A, to: B }, 'r', { model, ts: 'bucket', org: 'r.org' });
     const skip = split.length ? ` AND r.bucket NOT IN (${split.join(', ')})` : '';
     return { sql: `(${parts.map((x) => x.sql).join(' UNION ALL ')} UNION ALL SELECT ${SUMMED} FROM event_rollup r WHERE ${w.sql}${nm('r')}${skip}) e`,
@@ -517,6 +522,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     },
 
     async team(f, tzMin = 0, { single = false, parts = 'all', skip = [] } = {}) {
+      f = await withDays(f, ['team.requests', 'team.features', 'team.tools', 'team.hooks', 'team.errors', 'team.asks', 'team.compactions']);
       const core = parts === 'core', skips = new Set(skip);
       const day = T('ts', 'day', { offSec: Math.round(tzMin) * 60 });
       const len = f.to - f.from;
@@ -531,7 +537,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
 
       const sw = source(f), sp = source({ ...f, from: f.from - len, to: f.from });
       const add = (cond, col = 'n') => `SUM(CASE WHEN ${cond} THEN ${col} ELSE 0 END)`;
-      const stat$ = per(`SELECT e.user_key,
+      const statSlow = () => per(`SELECT e.user_key,
           ${add(`name = 'user_prompt'`)} prompts,
           COUNT(DISTINCT CASE WHEN name = 'user_prompt' THEN session_id END) sessions,
           ${add(`name = 'api_request'`)} requests,
@@ -556,42 +562,125 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
           MAX(CASE WHEN name IN ('user_prompt', 'api_request', 'tool_result') THEN max_ts END) last_active,
           COUNT(DISTINCT CASE WHEN name = 'user_prompt' THEN ${day} END) active_days
         FROM ${sw.sql} GROUP BY e.user_key`, sw.params);
-      const prev$ = per(`SELECT e.user_key, ${add(`name = 'user_prompt'`)} prompts, SUM(CASE WHEN name = 'api_request' THEN tok END) tokens,
+      const prevSlow = () => per(`SELECT e.user_key, ${add(`name = 'user_prompt'`)} prompts, SUM(CASE WHEN name = 'api_request' THEN tok END) tokens,
           COUNT(DISTINCT CASE WHEN name = 'user_prompt' THEN session_id END) sessions
         FROM ${sp.sql} GROUP BY e.user_key`, sp.params);
+      const pqOk = fast('team.totals') && rollup() && f.members?.length && !f.client && !f.user && (!f.scope || f.scope.every((m) => m.all)) ? pqReady(S) : Promise.resolve(false);
+      const sumIn = (a, b) => (a == null ? b ?? null : b == null ? a : Number(a) + Number(b));
+      const fat = async (g, cols, edgeSql) => {
+        const ed = source(g, { edges: true });
+        const since = new Map((g.scope || []).map((m) => [m.account_id, Number(m.since) || 0]));
+        const who = g.members.map(() => '(q.user_key = ? AND q.bucket >= ?)').join(' OR ');
+        const [mid, edge] = await Promise.all([
+          ed.A ? all(`SELECT q.user_key, ${Object.entries(cols).map(([k, c]) => `${c === 'last_active' ? 'MAX' : 'SUM'}(q.${c}) ${k}`).join(', ')} FROM person_quarter q
+            WHERE (${who}) AND q.bucket >= ? AND q.bucket < ? GROUP BY 1`, [...g.members.flatMap((u) => [u, since.get(u) || 0]), ed.A, ed.B]) : [],
+          all(`SELECT e.user_key, ${edgeSql} FROM ${ed.sql} GROUP BY e.user_key`, ed.params)]);
+        const m = new Map();
+        for (const r of [...mid, ...edge]) {
+          const o = m.get(r.user_key);
+          if (!o) { m.set(r.user_key, { ...r }); continue; }
+          for (const k of Object.keys(cols)) o[k] = k === 'last_active' ? (o[k] == null ? r[k] : r[k] == null ? o[k] : Math.max(Number(o[k]), Number(r[k]))) : sumIn(o[k], r[k]);
+        }
+        return m;
+      };
+      const distinct = async (g, cols) => { const s1 = source(g, { names: ['user_prompt'] }); return per(`SELECT e.user_key, ${cols} FROM ${s1.sql} GROUP BY e.user_key`, s1.params); };
+      const STAT_COLS = { prompts: 'prompts', requests: 'requests', main_requests: 'main_requests', tokens: 'tok', cost: 'cost', cache_read: 'cache_read', input_all: 'input_all',
+        tools: 'tools', tool_fail: 'tool_fails', api_errors: 'api_errors', plen_sum: 'plen_sum', plen_n: 'plen_n', asks: 'asks', rejects: 'rejects', decisions: 'decisions',
+        skills: 'skills', subagents: 'subagents', web: 'c_web', edits: 'c_edit', mentions: 'mentions', mcp: 'mcp', compactions: 'compactions', last_active: 'last_active' };
+      const STAT_EDGE = `${add(`name = 'user_prompt'`)} prompts, ${add(`name = 'api_request'`)} requests, ${add(`name = 'api_request' AND sub = 0`)} main_requests,
+          SUM(CASE WHEN name = 'api_request' THEN tok END) tokens, SUM(CASE WHEN name = 'api_request' THEN cost END) cost,
+          SUM(CASE WHEN name = 'api_request' THEN cache_read END) cache_read, SUM(CASE WHEN name = 'api_request' THEN input_all END) input_all,
+          ${add(`name = 'tool_result'`)} tools, ${add(`name = 'tool_result'`, 'fails')} tool_fail, ${add(`name = 'api_error'`)} api_errors,
+          SUM(CASE WHEN name = 'user_prompt' THEN plen_sum END) plen_sum, SUM(CASE WHEN name = 'user_prompt' THEN plen_n END) plen_n,
+          ${add(`name = 'tool_decision' AND by_user = 1`)} asks, ${add(`name = 'tool_decision' AND decision LIKE '%reject%'`)} rejects, ${add(`name = 'tool_decision'`)} decisions,
+          ${add(`name = 'skill_activated'`)} skills, ${add(`name = 'subagent_completed'`)} subagents,
+          ${add(`name = 'tool_result' AND tool_name IN ('WebFetch', 'WebSearch')`)} web, ${add(`name = 'tool_result' AND tool_name IN ('Edit', 'Write', 'MultiEdit', 'NotebookEdit')`)} edits,
+          ${add(`name = 'at_mention'`)} mentions, ${add(`name = 'api_request' AND label IS NOT NULL`)} mcp, ${add(`name = 'compaction'`)} compactions,
+          MAX(CASE WHEN name IN ('user_prompt', 'api_request', 'tool_result') THEN max_ts END) last_active`;
+      const stat$ = (async () => {
+        if (!(await pqOk)) return statSlow();
+        const [t, d] = await Promise.all([fat(f, STAT_COLS, STAT_EDGE), distinct(f, `COUNT(DISTINCT session_id) sessions, COUNT(DISTINCT ${day}) active_days`)]);
+        for (const [u, r] of t) {
+          const x = d.get(u);
+          r.sessions = x ? Number(x.sessions) : 0; r.active_days = x ? Number(x.active_days) : 0;
+          r.avg_prompt = Number(r.plen_n) ? (r.plen_sum == null ? null : Number(r.plen_sum) / Number(r.plen_n)) : null;
+          delete r.plen_sum; delete r.plen_n;
+        }
+        return t;
+      })();
+      const prev$ = (async () => {
+        if (!(await pqOk)) return prevSlow();
+        const g = { ...f, from: f.from - len, to: f.from };
+        const [t, d] = await Promise.all([fat(g, { prompts: 'prompts', tokens: 'tok' }, `${add(`name = 'user_prompt'`)} prompts, SUM(CASE WHEN name = 'api_request' THEN tok END) tokens`),
+          distinct(g, 'COUNT(DISTINCT session_id) sessions')]);
+        for (const [u, r] of t) { const x = d.get(u); r.sessions = x ? Number(x.sessions) : 0; }
+        return t;
+      })();
       const sReq = source(f, { names: ['api_request'] });
-      const models$ = group(`SELECT e.user_key, model, SUM(tok) tokens FROM ${sReq.sql} GROUP BY 1, 2 ORDER BY 3 DESC, 2`, sReq.params);
-      const effort$ = group(`SELECT e.user_key, COALESCE(effort, 'default') effort, SUM(n) n FROM ${sReq.sql} GROUP BY 1, 2 ORDER BY 1, 2`, sReq.params);
+      const sReqD = source(f, { names: ['api_request'], day: 'team.requests' });
+      const models$ = group(`SELECT e.user_key, model, SUM(tok) tokens FROM ${sReqD.sql} GROUP BY 1, 2 ORDER BY 3 DESC, 2`, sReqD.params);
+      const effort$ = group(`SELECT e.user_key, COALESCE(effort, 'default') effort, SUM(n) n FROM ${sReqD.sql} GROUP BY 1, 2 ORDER BY 1, 2`, sReqD.params);
       const sPr = source(f, { names: ['user_prompt'] }), sPrReq = source(f, { names: ['user_prompt', 'api_request'] });
       const clients$ = group(`SELECT e.user_key, ${CLIENT} client, COUNT(DISTINCT e.session_id) n FROM ${sPr.sql} JOIN sessions s ON s.session_id = e.session_id
           GROUP BY 1, 2 ORDER BY 3 DESC, 2`, sPr.params);
       const clientNow$ = per(`SELECT user_key, client FROM (SELECT e.user_key, ${CLIENT} client, MAX(e.max_ts) t FROM ${sPrReq.sql} JOIN sessions s ON s.session_id = e.session_id
           GROUP BY 1, 2) x ORDER BY t`, sPrReq.params);
-      const effortNow$ = per(`SELECT user_key, effort FROM (SELECT e.user_key, effort, MAX(e.max_ts) t FROM ${sReq.sql} WHERE effort IS NOT NULL GROUP BY 1, 2) x ORDER BY t`, sReq.params);
+      const effortNow$ = per(`SELECT user_key, effort FROM (SELECT e.user_key, effort, MAX(e.max_ts) t FROM ${sReqD.sql} WHERE effort IS NOT NULL GROUP BY 1, 2) x ORDER BY t`, sReqD.params);
       const ctxRows$ = group(`SELECT e.user_key, e.session_id, e.model, MAX(ctx_max) used, MAX(win_max) win FROM ${sReq.sql} WHERE compact = 0 GROUP BY 1, 2, 3`, sReq.params);
       const contextOf = (k) => {
         const peaks = (ctxRows.get(k) || []).map((r) => Math.min(1, Number(r.used) / (Number(r.win) || contextWindow(r.model)))).filter((x) => x > 0).sort((a, b) => a - b);
         if (!peaks.length) return null;
         return { typical: Math.round(peaks[Math.floor((peaks.length - 1) / 2)] * 100), max: Math.round(peaks[peaks.length - 1] * 100), full: peaks.filter((x) => x >= 0.9).length, sessions: peaks.length };
       };
-      const sNames = source(f, { names: ['skill_activated', 'api_request', 'subagent_completed'] });
+      const sNames = source(f, { names: ['skill_activated', 'api_request', 'subagent_completed'], day: 'team.features' });
       const names$ = skips.has('features') ? Promise.resolve(new Map()) : group(`SELECT e.user_key, CASE name WHEN 'skill_activated' THEN 'skill' WHEN 'api_request' THEN 'mcp' ELSE 'agent' END kind, label, SUM(n) n
           FROM ${sNames.sql} WHERE label IS NOT NULL GROUP BY 1, 2, 3 ORDER BY 4 DESC, 3`, sNames.params);
       const mem = f.members ? { sql: `user_key IN (${f.members.map(() => '?').join(', ') || 'NULL'})`, p: f.members } : { sql: '1 = 1', p: [] };
-      const plugins$ = skips.has('features') ? Promise.resolve(new Map()) : group(`SELECT user_key, ${J('attrs_json', 'plugin.name')} label, MAX(ts) ts FROM events
+      const plugins$ = skips.has('features') ? Promise.resolve(new Map()) : (() => {
+        const key = mem.p.join(','), hit = pluginCache.get(key);
+        if (hit && clock() - hit.at < 600_000) return hit.p;
+        const p = group(`SELECT user_key, ${J('attrs_json', 'plugin.name')} label, MAX(ts) ts FROM events
           WHERE name = 'plugin_loaded' AND ts >= ? AND ${mem.sql} GROUP BY 1, 2 ORDER BY 1, 2`, [clock() - 90 * 864e5, ...mem.p]);
-      const wm = where(f, 'm');
-      const metrics$ = group(`SELECT m.user_key, name, type, SUM(value) v FROM metric_points m WHERE ${wm.sql} GROUP BY 1, 2, 3`, wm.params);
-      const prompted = (g) => { const src = promptSource(g); return { sql: `(SELECT e.user_key, e.up_min AS ts, e.up FROM ${src.sql} WHERE e.up > 0) e`, params: src.params }; };
-      const p7 = prompted({ ...f, from: clock() - 7 * 86400_000, to: clock() + 60_000 });
-      const days$ = group(`SELECT user_key, ${day} AS day, SUM(up) prompts FROM ${p7.sql} GROUP BY 1, 2 ORDER BY 1, 2`, p7.params);
+        pluginCache.set(key, { at: clock(), p });
+        p.catch(() => pluginCache.delete(key));
+        if (pluginCache.size > 200) pluginCache.delete(pluginCache.keys().next().value);
+        return p;
+      })();
+      const metricsRaw = (g) => { const w = where(g, 'm'); return { sql: `SELECT m.user_key, m.name, m.type, m.value v FROM metric_points m WHERE ${w.sql}`, params: w.params }; };
+      const metrics$ = (async () => {
+        const A = Math.ceil(f.from / QUARTER) * QUARTER, B = Math.floor(f.to / QUARTER) * QUARTER;
+        const quick = fast('team.metrics') && rollup() && A < B && f.members?.length && !f.client && !f.user
+          && (!f.scope || f.scope.every((m) => m.all && (Number(m.since) || 0) % QUARTER === 0)) && await pqReady(S);
+        if (!quick) { const r = metricsRaw(f); return group(`SELECT e.user_key, name, type, SUM(v) v FROM (${r.sql}) e GROUP BY 1, 2, 3`, r.params); }
+        const since = new Map((f.scope || []).map((m) => [m.account_id, Number(m.since) || 0]));
+        const head = metricsRaw({ ...f, to: A }), tail = metricsRaw({ ...f, from: B });
+        const who = f.members.map(() => '(q.user_key = ? AND q.bucket >= ?)').join(' OR ');
+        return group(`SELECT e.user_key, name, type, SUM(v) v FROM (${head.sql} UNION ALL ${tail.sql}
+            UNION ALL SELECT q.user_key, q.name, q.type, q.v FROM metric_quarter q WHERE (${who}) AND q.bucket >= ? AND q.bucket < ?) e GROUP BY 1, 2, 3`,
+        [...head.params, ...tail.params, ...f.members.flatMap((u) => [u, since.get(u) || 0]), A, B]);
+      })();
+      const pfOk = rollup() && f.members?.length && !f.client && !f.user && (!f.scope || f.scope.every((m) => m.all && (Number(m.since) || 0) % QUARTER === 0)) ? pqReady(S) : Promise.resolve(false);
+      const facts = async (g) => {
+        if (!(await pfOk)) return null;
+        const since = new Map((f.scope || []).map((m) => [m.account_id, Number(m.since) || 0]));
+        const who = f.members.map(() => '(pf.user_key = ? AND pf.t >= ?)').join(' OR '), wp2 = f.members.flatMap((u) => [u, since.get(u) || 0]);
+        const twice = await one(`SELECT 1 x FROM prompt_facts pf WHERE (${who}) AND pf.ups > 1 AND pf.up_max >= ? AND pf.t < ? LIMIT 1`, [...wp2, Math.floor(g.from) - QUARTER, Math.ceil(g.to)]);
+        if (twice) return null;
+        return { sql: `(SELECT pf.user_key, pf.t AS ts, 1 AS up, pf.prompt_id, pf.ans_max FROM prompt_facts pf WHERE (${who}) AND pf.ups = 1 AND pf.t >= ? AND pf.t < ?) e`, params: [...wp2, Math.floor(g.from), Math.ceil(g.to)] };
+      };
+      const promptedSlow = (g) => { const src = promptSource(g); return { sql: `(SELECT e.user_key, e.up_min AS ts, e.up FROM ${src.sql} WHERE e.up > 0) e`, params: src.params }; };
+      const prompted = async (g) => (fast('team.prompts') && await facts(g)) || promptedSlow(g);
+      const days$ = (async () => { const p7 = await prompted({ ...f, from: clock() - 7 * 86400_000, to: clock() + 60_000 });
+        return group(`SELECT user_key, ${day} AS day, SUM(up) prompts FROM ${p7.sql} GROUP BY 1, 2 ORDER BY 1, 2`, p7.params); })();
       const wpp = where(f, 'p');
       const waitsRaw = (extra = '', ps = []) => all(`SELECT p.user_key, MAX(a.ts) - p.ts wall FROM events p JOIN events a ON a.prompt_id = p.prompt_id
           AND a.name IN ('api_request', 'assistant_response', 'tool_result')
           WHERE p.name = 'user_prompt' AND p.prompt_id IS NOT NULL AND ${wpp.sql}${extra} GROUP BY p.id, p.user_key, p.ts`, [...wpp.params, ...ps]);
       const waits$ = (async () => {
       let waitRows;
+      const quickWaits = fast('team.waits') && rollup() ? await facts(f) : null;
       if (!rollup()) waitRows = await waitsRaw();
+      else if (quickWaits) waitRows = (await all(`SELECT e.user_key, e.ans_max - e.ts wall FROM ${quickWaits.sql} WHERE e.ans_max IS NOT NULL`, quickWaits.params)).map((r) => ({ user_key: r.user_key, wall: Number(r.wall) }));
       else {
         const sw2 = promptSource(f);
         const per1 = await all(`SELECT p.user_key, p.prompt_id, p.ups, p.t, MAX(q.ans_max) a FROM (SELECT e.user_key, e.prompt_id, SUM(up) ups, MIN(up_min) t FROM ${sw2.sql}
@@ -621,22 +710,48 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       }
       })();
 
-      const sTool = source(f, { names: ['tool_result'] });
+      const sTool = source(f, { names: ['tool_result'], day: 'team.tools' });
       const mix$ = group(`SELECT e.user_key, ${TOOL_CATEGORY} cat, SUM(n) n FROM ${sTool.sql} GROUP BY 1, 2`, sTool.params);
       const size = Math.max(60_000, Math.ceil((f.to - f.from) / LANE_BUCKETS));
       const cuts = Array.from({ length: LANE_BUCKETS + 1 }, (_, k) => Math.floor(f.from) + k * size);
-      const sLane = source(f, { names: ['user_prompt', 'tool_result', 'api_error'], cuts, rawOnly: size < QUARTER });
-      const lanes$ = group(`SELECT e.user_key, CAST((ts - ${Math.floor(f.from)}) / ${size} AS BIGINT) b, ${add(`name = 'user_prompt'`)} p,
+      const laneSql = (src) => `SELECT e.user_key, CAST((ts - ${Math.floor(f.from)}) / ${size} AS BIGINT) b, ${add(`name = 'user_prompt'`)} p,
           ${CATEGORIES.map((c) => `${add(`name = 'tool_result' AND ${TOOL_CATEGORY} = '${c}'`)} ${c}`).join(', ')},
           ${add(`name = 'tool_result'`, 'fails')} + ${add(`name = 'api_error'`)} fail
-        FROM ${sLane.sql} GROUP BY 1, 2`, sLane.params);
+        FROM ${src.sql} GROUP BY 1, 2`;
+      const laneNames = ['user_prompt', 'tool_result', 'api_error'];
+      const lanes$ = (async () => {
+        const quick = fast('team.lanes') && size >= QUARTER && rollup() && f.members?.length && !f.client && !f.user && (!f.scope || f.scope.every((m) => m.all)) && await pqReady(S);
+        if (!quick) { const sLane = source(f, { names: laneNames, cuts, rawOnly: size < QUARTER }); return group(laneSql(sLane), sLane.params); }
+        const ed = source(f, { names: laneNames, cuts, edges: true });
+        if (!ed.A) return group(laneSql(ed), ed.params);
+        const since = new Map((f.scope || []).map((m) => [m.account_id, Number(m.since) || 0]));
+        const who = f.members.map(() => '(q.user_key = ? AND q.bucket >= ?)').join(' OR ');
+        const ranges = [[f.from, ed.A], ...ed.split.map((q) => [q, q + QUARTER]), [ed.B, f.to]].filter(([x, y]) => y > x);
+        const slim = ranges.map(() => `SELECT x.user_key, x.ts, x.name, x.tool_name, CASE WHEN x.success = 0 THEN 1 ELSE 0 END fails, 1 n FROM events x
+          WHERE x.name IN ('user_prompt', 'tool_result', 'api_error') AND x.user_key IN (${f.members.map(() => '?').join(', ')}) AND x.ts >= ? AND x.ts < ?
+            AND (${f.members.map(() => '(x.user_key = ? AND x.ts >= ?)').join(' OR ')}) AND NOT EXISTS (SELECT 1 FROM excluded_sessions xs WHERE xs.session_id = x.session_id)`).join(' UNION ALL ');
+        const slimParams = ranges.flatMap(([x, y]) => [...f.members, Math.floor(x), Math.ceil(y), ...f.members.flatMap((u) => [u, since.get(u) || 0])]);
+        const [a, b] = await Promise.all([all(laneSql({ sql: `(${slim}) e`, params: slimParams }), slimParams),
+          all(`SELECT q.user_key, CAST((q.bucket - ${Math.floor(f.from)}) / ${size} AS BIGINT) b, SUM(q.prompts) p, ${CATEGORIES.map((c) => `SUM(q.c_${c}) ${c}`).join(', ')},
+              SUM(q.tool_fails) + SUM(q.api_errors) fail FROM person_quarter q WHERE (${who}) AND q.bucket >= ? AND q.bucket < ?${ed.split.length ? ` AND q.bucket NOT IN (${ed.split.join(', ')})` : ''} GROUP BY 1, 2 HAVING SUM(q.prompts) + SUM(q.tools) + SUM(q.api_errors) > 0`,
+          [...f.members.flatMap((u) => [u, since.get(u) || 0]), ed.A, ed.B])]);
+        const m = new Map(), keys = ['p', ...CATEGORIES, 'fail'];
+        for (const r of [...a, ...b]) {
+          const k = `${r.user_key}|${r.b}`, o = m.get(k);
+          if (!o) { m.set(k, { user_key: r.user_key, b: Number(r.b), ...Object.fromEntries(keys.map((x) => [x, Number(r[x]) || 0])) }); continue; }
+          for (const x of keys) o[x] += Number(r[x]) || 0;
+        }
+        const out = new Map(); for (const r of m.values()) { if (!out.has(r.user_key)) out.set(r.user_key, []); out.get(r.user_key).push(r); }
+        return out;
+      })();
       const wn = where({ ...f, from: clock() - 2 * 86400_000, to: clock() + 60_000 }, 'e');
       const everything = !f.scope || f.scope.every((m) => m.all);
       const latestRowOf = (names, cols) => (async () => {
         const m = new Map();
-        const rows = await Promise.all(f.members.map((u) => one(`SELECT user_key, ts, id, ${cols} FROM events WHERE user_key = ? AND name IN (${names.map(() => '?').join(', ')}) AND ts >= ?
-          ORDER BY ts DESC, id DESC LIMIT 1`, [u, ...names, clock() - 2 * 86400_000])));
-        for (const r of rows) if (r) m.set(r.user_key, r);
+        const since = clock() - 2 * 86400_000;
+        const each = names.map(() => `SELECT * FROM (SELECT user_key, ts, id, ${cols} FROM events WHERE user_key = ? AND name = ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT 1) x`).join(' UNION ALL ');
+        const rows = await Promise.all(f.members.map((u) => all(each, names.flatMap((k) => [u, k, since]))));
+        for (const r of rows.flat()) { const b = m.get(r.user_key); if (!b || Number(r.ts) > Number(b.ts) || (Number(r.ts) === Number(b.ts) && Number(r.id) > Number(b.id))) m.set(r.user_key, r); }
         return m;
       })();
       const lastEv$ = f.members && everything ? latestRowOf(['user_prompt', 'api_request', 'tool_result', 'tool_decision'], 'name, tool_name')
@@ -655,9 +770,17 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       })();
       const wb = where({ ...f, from: f.from - 28 * 86400_000, to: f.from }, 'e');
       const sb = source({ ...f, from: f.from - 28 * 86400_000, to: f.from });
-      const usual$ = per(`SELECT e.user_key, SUM(CASE WHEN name = 'api_request' THEN tok END) tokens, ${add(`name = 'user_prompt'`)} prompts,
+      const usualSlow = () => per(`SELECT e.user_key, SUM(CASE WHEN name = 'api_request' THEN tok END) tokens, ${add(`name = 'user_prompt'`)} prompts,
           COUNT(DISTINCT CASE WHEN name = 'user_prompt' THEN ${day} END) days
         FROM ${sb.sql} GROUP BY e.user_key`, sb.params);
+      const usual$ = (async () => {
+        if (!(await pqOk)) return usualSlow();
+        const g = { ...f, from: f.from - 28 * 86400_000, to: f.from };
+        const [t, d] = await Promise.all([fat(g, { tokens: 'tok', prompts: 'prompts' }, `SUM(CASE WHEN name = 'api_request' THEN tok END) tokens, ${add(`name = 'user_prompt'`)} prompts`),
+          distinct(g, `COUNT(DISTINCT ${day}) days`)]);
+        for (const [u, r] of t) { const x = d.get(u); r.days = x ? Number(x.days) : 0; }
+        return t;
+      })();
       const toolStats$ = group(`SELECT e.user_key, tool_name tool, SUM(n) calls, SUM(fails) fails FROM ${sTool.sql} GROUP BY 1, 2 ORDER BY 1, 2`, sTool.params);
       const sStuck = promptSource(f);
       const streaks = new Map();
@@ -676,18 +799,18 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         for (const s1 of best.values()) { if (!streaks.has(s1.user)) streaks.set(s1.user, []); streaks.get(s1.user).push(s1); }
       }
       })();
-      const sHook = source(f, { names: ['hook_execution_complete'] });
+      const sHook = source(f, { names: ['hook_execution_complete'], day: 'team.hooks' });
       const hooks$ = group(`SELECT e.user_key, label name, SUM(n) runs, SUM(hook_err) errors FROM ${sHook.sql} GROUP BY 1, 2 ORDER BY 1, 2`, sHook.params);
-      const sErr = source(f, { names: ['api_error'] });
+      const sErr = source(f, { names: ['api_error'], day: 'team.errors' });
       const apiErr$ = group(`SELECT e.user_key, CAST(label AS INTEGER) code, SUM(n) n FROM ${sErr.sql} GROUP BY 1, 2`, sErr.params);
-      const sDec = source(f, { names: ['tool_decision'] });
+      const sDec = source(f, { names: ['tool_decision'], day: 'team.asks' });
       const asksBy$ = group(`SELECT e.user_key, tool_name tool, ${add('by_user = 1')} n, ${add(`by_user = 1 AND decision LIKE '%reject%'`)} rej
         FROM ${sDec.sql} GROUP BY 1, 2 ORDER BY 1, 2`, sDec.params);
-      const sCmp = source(f, { names: ['compaction'] });
+      const sCmp = source(f, { names: ['compaction'], day: 'team.compactions' });
       const compactAuto$ = per(`SELECT e.user_key, SUM(n) n FROM ${sCmp.sql} WHERE label = 'auto' GROUP BY 1`, sCmp.params);
       const versions$ = group(`SELECT user_key, app_version v FROM sessions WHERE app_version IS NOT NULL AND last_seen > ? GROUP BY 1, 2 ORDER BY 1, 2`, [clock() - 14 * 86400_000]);
-      const p60 = prompted({ ...f, from: clock() - 60 * 86400_000, to: clock() + 60_000 });
-      const promptTimes$ = group(`SELECT e.user_key, ts FROM ${p60.sql} ORDER BY ts`, p60.params);
+      const promptTimes$ = (async () => { const p60 = await prompted({ ...f, from: clock() - 60 * 86400_000, to: clock() + 60_000 });
+        return group(`SELECT e.user_key, ts FROM ${p60.sql} ORDER BY ts`, p60.params); })();
       const fb$ = all(`SELECT user_key, kind, verdict, ts FROM (SELECT user_key, kind, verdict, ts,
           ROW_NUMBER() OVER (PARTITION BY user_key, kind ORDER BY ts DESC, id DESC) rn FROM flag_feedback WHERE ts > ?) x WHERE rn = 1`, [clock() - 14 * 86400_000]);
       const fbOf = (u, k) => fb.find((r) => r.user_key === u && r.kind === k);
@@ -695,8 +818,8 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const catOf = (t) => /^(Read|Grep|Glob|LS|NotebookRead)$/.test(t) ? 'read' : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(t) ? 'edit'
         : /^(Bash|BashOutput|KillShell|KillBash|Monitor)$/.test(t) ? 'run' : /^(WebFetch|WebSearch)$/.test(t) ? 'web'
         : /^(Agent|Task|Skill|Workflow)$/.test(t) ? 'agent' : /^mcp(__|_tool$)/.test(String(t)) ? 'mcp' : 'other';
-      const p2 = prompted({ ...f, from: clock() - 2 * 86400_000, to: clock() + 60_000 });
-      const lastPrompt$ = per(`SELECT e.user_key, MAX(ts) ts FROM ${p2.sql} GROUP BY e.user_key`, p2.params);
+      const lastPrompt$ = (async () => { const p2 = await prompted({ ...f, from: clock() - 2 * 86400_000, to: clock() + 60_000 });
+        return per(`SELECT e.user_key, MAX(ts) ts FROM ${p2.sql} GROUP BY e.user_key`, p2.params); })();
 
       const sPrompt = promptSource(f);
       const runsBy$ = group(`SELECT e.user_key, e.prompt_id, SUM(up) up, SUM(steps) steps, SUM(fails) fails FROM ${sPrompt.sql} GROUP BY 1, 2`, sPrompt.params);
@@ -915,7 +1038,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         inp: sum(list, 'inp'), out: sum(list, 'out'), cr: sum(list, 'cr'), cw: sum(list, 'cw') }))
         .sort((a, b) => b.last - a.last);
       const people = new Map(); for (const x of prompts) { const p = people.get(x.u) || { user_key: x.u, cost: 0, prompts: 0 }; p.cost += x.cost; p.prompts++; people.set(x.u, p); }
-      const team = (await this.filters(f)).users.map((u) => ({ user_key: u.user_key, name: u.name || (u.email ? u.email.split('@')[0] : 'someone') }));
+      const team = (await this.people(f)).map((u) => ({ user_key: u.user_key, name: u.name || (u.email ? u.email.split('@')[0] : 'someone') }));
       return { name, repo: Boolean(sp[0].repo), range: { from: f.from, to: f.to }, team,
         totals: { cost: Math.round(sum(prompts, 'cost') * 100) / 100, tok: sum(prompts, 'tok'), prompts: prompts.length, conversations: conversations.length,
           ctx: med(prompts.map((x) => x.ctx)), perPrompt: med(prompts.map((x) => x.cost)), inp: sum(prompts, 'inp'), out: sum(prompts, 'out'), cr: sum(prompts, 'cr'), cw: sum(prompts, 'cw') },
@@ -945,7 +1068,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       return { total: rows.length, page: at, per, pages, team, people, projects, rows: rows.slice((at - 1) * per, at * per) };
     },
     async workList(f) {
-      const [sp, times, promptRows, filt] = await Promise.all([this.sessionProjects(f), sessionTimesIn(f), perPrompt(taskSource(f)), this.filters(f)]);
+      const [sp, times, promptRows, filt] = await Promise.all([this.sessionProjects(f), sessionTimesIn(f), perPrompt(taskSource(f)), this.people(f)]);
       const spent = new Map();
       for (const r of promptRows) {
         if (!Number(r.calls)) continue;
@@ -959,7 +1082,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         return { session_id: r.session_id, title: r.title || null, user_key: r.user_key, project: r.repo || r.folder, last: times.last.get(r.session_id) || null,
           minutes: Math.round(times.min.get(r.session_id) || 0), cost: Math.round(s.cost * 100) / 100, tok: s.tok, prompts: s.prompts };
       }).sort((a, b) => (b.last || 0) - (a.last || 0));
-      const team = filt.users.map((u) => ({ user_key: u.user_key, name: u.name || (u.email ? u.email.split('@')[0] : 'someone') }));
+      const team = filt.map((u) => ({ user_key: u.user_key, name: u.name || (u.email ? u.email.split('@')[0] : 'someone') }));
       return { list, team };
     },
 
@@ -1002,14 +1125,19 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
 
     async prompts(f) {
       const w = where(f, 'p');
-      const rows = await all(`SELECT p.ts, p.user_key, p.agent, p.prompt_length len,
-          SUM(COALESCE(a.input_tokens,0) + COALESCE(a.output_tokens,0) + COALESCE(a.cache_read,0) + COALESCE(a.cache_creation,0)) tokens,
-          SUM(a.output_tokens) output, MAX(COALESCE(a.input_tokens,0) + COALESCE(a.cache_read,0) + COALESCE(a.cache_creation,0)) ctx,
-          MAX(a.model) model, COUNT(a.id) requests, SUM(a.cost_usd) cost, MAX(a.ts) end_ts,
-          (SELECT COUNT(*) FROM events t WHERE t.prompt_id = p.prompt_id AND t.name = 'tool_result') steps
-        FROM events p LEFT JOIN events a ON a.prompt_id = p.prompt_id AND a.name = 'api_request'
-        WHERE p.name = 'user_prompt' AND p.prompt_id IS NOT NULL AND ${w.sql}
-        GROUP BY p.id, p.ts, p.user_key, p.agent, p.prompt_length, p.prompt_id ORDER BY p.ts`, w.params);
+      const asked = await all(`SELECT p.id, p.ts, p.user_key, p.agent, p.prompt_length len, p.prompt_id FROM events p
+        WHERE p.name = 'user_prompt' AND p.prompt_id IS NOT NULL AND ${w.sql} ORDER BY p.ts, p.id`, w.params);
+      const ids = [...new Set(asked.map((r) => r.prompt_id))], calls = new Map(), steps = new Map();
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500), marks = chunk.map(() => '?').join(', ');
+        for (const r of await all(`SELECT prompt_id, SUM(COALESCE(input_tokens,0) + COALESCE(output_tokens,0) + COALESCE(cache_read,0) + COALESCE(cache_creation,0)) tokens,
+            SUM(output_tokens) output, MAX(COALESCE(input_tokens,0) + COALESCE(cache_read,0) + COALESCE(cache_creation,0)) ctx,
+            MAX(model) model, COUNT(*) requests, SUM(cost_usd) cost, MAX(ts) end_ts
+          FROM events WHERE name = 'api_request' AND prompt_id IN (${marks}) GROUP BY prompt_id`, chunk)) calls.set(r.prompt_id, r);
+        for (const r of await all(`SELECT prompt_id, COUNT(*) n FROM events WHERE name = 'tool_result' AND prompt_id IN (${marks}) GROUP BY prompt_id`, chunk)) steps.set(r.prompt_id, r.n);
+      }
+      const none = { tokens: 0, output: null, ctx: 0, model: null, requests: 0, cost: null, end_ts: null };
+      const rows = asked.map((p) => ({ ...none, ...calls.get(p.prompt_id), ...p, steps: steps.get(p.prompt_id) || 0 }));
       return rows.map((r) => {
         const ts = Number(r.ts), win = contextWindow(r.model), ctx = Number(r.ctx) || 0;
         return { ts, user: r.user_key, agent: r.agent, model: r.model || null, tokens: Number(r.tokens) || 0, output: Number(r.output) || 0,
@@ -1019,10 +1147,14 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       });
     },
 
+    async people(f = {}) {
+      return (await all(`SELECT user_key, email, name, country, last_seen FROM users ORDER BY first_seen, user_key`, [])).filter((u) => !f.members || f.members.includes(u.user_key));
+    },
+
     async filters(f = {}) {
       const m = f.members ? where({ from: 0, to: 8.64e15, members: f.members }, 'e') : null;
       return {
-        users: (await all(`SELECT user_key, email, name, country, last_seen FROM users ORDER BY first_seen, user_key`, [])).filter((u) => !f.members || f.members.includes(u.user_key)),
+        users: await this.people(f),
         models: (await all(`SELECT DISTINCT model FROM events e WHERE model IS NOT NULL ${m ? 'AND ' + m.sql : ''} ORDER BY 1`, m ? m.params : [])).map((r) => r.model),
         clients: (await all(`SELECT DISTINCT ${CLIENT} client FROM sessions s ${f.members ? `WHERE s.user_key IN (${f.members.map(() => '?').join(',') || 'NULL'})` : ''} ORDER BY 1`, f.members || [])).map((r) => r.client),
       };
@@ -1031,11 +1163,14 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
     async health(f = {}) {
       const m = where({ from: 0, to: 8.64e15, members: f.members }, 'e');
       const mm = where({ from: 0, to: 8.64e15, members: f.members }, 'm');
-      const ever = source({ from: 0, to: 8.64e15, members: f.members }), hour = source({ from: clock() - 3600_000 + 1, to: 8.64e15, members: f.members });
+      const ever = source(await withDays({ from: 0, to: 8.64e15, members: f.members }, ['health.ever']), { day: 'health.ever' }), hour = source({ from: clock() - 3600_000 + 1, to: 8.64e15, members: f.members });
       const bySource = await all(`SELECT source, SUM(n) n, MAX(max_ts) t FROM ${ever.sql} GROUP BY source`, ever.params);
       return {
         lastEvent: bySource.reduce((a, r) => (a == null || (r.t != null && r.t > a) ? r.t : a), null),
-        lastMetric: (await one(`SELECT MAX(ts) t FROM metric_points m WHERE ${mm.sql}`, mm.params)).t,
+        lastMetric: f.members?.length
+          ? (await Promise.all(f.members.map((u) => one(`SELECT m.ts t FROM metric_points m WHERE m.user_key = ?
+              AND (m.session_id IS NULL OR m.session_id NOT IN (SELECT xs.session_id FROM excluded_sessions xs WHERE xs.session_id IS NOT NULL)) ORDER BY m.ts DESC LIMIT 1`, [u])))).reduce((a, r) => (r?.t != null && (a == null || Number(r.t) > Number(a)) ? r.t : a), null)
+          : (await one(`SELECT MAX(ts) t FROM metric_points m WHERE ${mm.sql}`, mm.params)).t,
         events: bySource.reduce((a, r) => a + Number(r.n), 0),
         bySource: Object.fromEntries(bySource.map((r) => [r.source, Number(r.n)])),
         lastHour: Number((await one(`SELECT SUM(n) n FROM ${hour.sql}`, hour.params))?.n) || 0,

@@ -1,3 +1,4 @@
+import { makeDayFiller, mqRefresh } from './fast.js';
 import { sqliteRollup, rollupSchema, rollupVersion, rebuildRollup, refreshRollup, touchedKeys, rebuildWindow, setRollupVersion, refreshRuns, refreshRunTails, rebuildRunsFor, sessionsOf, QUARTER, ROLLUP_VERSION } from './rollup.js';
 import { DatabaseSync } from 'node:sqlite';
 import { cumulativeDelta } from './otlp.js';
@@ -308,10 +309,36 @@ export async function matchCalls(T, rows0) {
   return drop.size ? rows.filter((r) => !drop.has(r)) : rows;
 }
 
+export const STEP_INDEXES = [
+  ['events_tool_steps', `ON events (prompt_id) INCLUDE (ts, id, user_key, tool_name, success) WHERE name = 'tool_result'`],
+  ['events_api_calls', `ON events (prompt_id) INCLUDE (ts, id, model, input_tokens, output_tokens, cache_read, cache_creation, cost_usd) WHERE name = 'api_request'`],
+  ['event_rollup_user_name_bucket', `ON event_rollup (user_key, name, bucket)`],
+  ['event_rollup_prompts', `ON event_rollup (user_key, bucket) INCLUDE (session_id, org, n) WHERE name = 'user_prompt'`],
+  ['events_tool_durations', `ON events (user_key, ts) INCLUDE (tool_name, duration_ms, session_id) WHERE name = 'tool_result' AND duration_ms IS NOT NULL`],
+  ['metric_points_sums', `ON metric_points (user_key, ts) INCLUDE (name, type, value, session_id)`],
+  ['events_lane', `ON events (user_key, ts) INCLUDE (name, tool_name, success, session_id) WHERE name IN ('user_prompt', 'tool_result', 'api_error')`],
+];
+async function buildStepIndexes(pool, log) {
+  const c = await pool.connect();
+  try {
+    await c.query('SET statement_timeout = 0');
+    for (const [name, def] of STEP_INDEXES) {
+      const had = (await c.query(`SELECT i.indisvalid ok FROM pg_class x JOIN pg_index i ON i.indexrelid = x.oid WHERE x.relname = $1`, [name])).rows[0];
+      if (had?.ok) continue;
+      if (had) await c.query(`DROP INDEX CONCURRENTLY IF EXISTS ${name}`);
+      const t = Date.now();
+      await c.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS ${name} ${def}`);
+      log(`index ${name} built in ${Math.round((Date.now() - t) / 1000)} s`);
+    }
+  } catch (e) { log(`index: ${e.message}`); } finally { c.release(); }
+}
+
 export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {}) {
   const S = pgSql(pg);
   await S.exec(schema('pg'));
   await S.exec(rollupSchema('pg'));
+  if (pg.lanes) buildStepIndexes(pg.lanes.background, log);
+  else for (const [name, def] of STEP_INDEXES) await S.exec(`CREATE INDEX IF NOT EXISTS ${name} ${def}`);
   const rollup = { ready: false, building: null };
   const lockFor = async (T, users) => { for (const u of [...new Set(users)].sort()) await T.one(`SELECT pg_advisory_xact_lock(hashtext(?))`, ['joule-rollup:' + (u ?? '')]); };
   const WEEK = 7 * 864e5;
@@ -330,6 +357,7 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
   if ((await rollupVersion(S)) === ROLLUP_VERSION) rollup.ready = true;
   else rollup.building = rollupSync ? await build() : build().catch((e) => log(`summary table: ${e.message}`));
 
+  const fillDays = makeDayFiller(S, { inTx: (fn) => inTx(pg, fn), lockFor, log });
   const giveWay = async (busy) => { for (let i = 0; i < 60 && busy?.(); i++) await new Promise((r) => setTimeout(r, 500)); };
 
   async function fillCosts({ since = 0, step = 300, pause = 50, busy = null } = {}) {
@@ -427,7 +455,7 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
   }
 
   return {
-    sql: S, dialect: 'pg', rollup: { ready: () => rollup.ready, building: () => rollup.building, check, fillPrompts, fillCosts, fixClientNames },
+    sql: S, dialect: 'pg', rollup: { ready: () => rollup.ready, building: () => rollup.building, check, fillPrompts, fillCosts, fixClientNames, fillDays },
     async upsertIdentity(id) {
       if (!id?.account_uuid && !id?.email) return;
       await S.run(st.upIdentity, identityArgs(id));
@@ -454,6 +482,7 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
     },
     insertPoints(points) {
       return inTx(pg, async (T) => {
+        await lockFor(T, points.map((p) => p.identity?.key).filter((u) => u != null));
         await touchAll(T, points);
         const out = [];
         for (const pt of points) {
@@ -461,7 +490,9 @@ export async function openPgStore(pg, { rollupSync = false, log = () => {} } = {
           if (pt.cumulative) { value = cumulativeDelta(await T.one(st.getState, [pt.series_key]) ?? undefined, pt); await T.run(st.setState, [pt.series_key, pt.start_ns, pt.value]); }
           if (value !== 0) out.push(pointArgs(pt, value));
         }
+        if (!out.length) return 0;
         for (const c of chunks(out)) await T.run(multi(st.insPoint, c.length, 8), c.flat());
+        await mqRefresh(T, out.map((r) => ({ user: r[2], ts: r[0] })));
         return out.length;
       });
     },

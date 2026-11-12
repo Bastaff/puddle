@@ -55,13 +55,18 @@
     if (!name.startsWith('to ')) { try { sessionStorage.setItem(KEY, JSON.stringify(pending)); } catch {} }
   }, true);
 
+  const serverSide = (r) => {
+    const o = {};
+    for (const s of r.serverTiming || []) { if (s.name === 'db') o.db = Math.round(s.duration); else if (s.name === 'pool' || s.name === 'turn') o.wait = Math.round((o.wait || 0) + s.duration); else if (s.name === 'served') o.served = s.description; }
+    return o;
+  };
   try {
     new PerformanceObserver((list) => {
       for (const r of list.getEntries()) {
         const u = new URL(r.name, location.href);
         if (!u.pathname.startsWith('/api/') || u.pathname === '/api/perf') continue;
         put({ kind: 'request', label: u.pathname + (u.searchParams.get('parts') ? '?parts' : '') + (u.searchParams.get('user') ? '?user' : '') + (u.searchParams.get('demo') ? '?demo' : ''),
-          ms: Math.round(r.duration), kb: Math.round((r.transferSize || r.encodedBodySize || 0) / 1024), at: Math.round(r.startTime) });
+          ms: Math.round(r.duration), kb: Math.round((r.transferSize || r.encodedBodySize || 0) / 1024), at: Math.round(r.startTime), ...serverSide(r) });
       }
     }).observe({ type: 'resource', buffered: true });
   } catch {  }

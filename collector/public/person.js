@@ -1,4 +1,4 @@
-import { hm, esc, spark, kpiTiles, todayCard, dayChart } from '/you.js';
+import { hm, esc, todayCard, dayChart } from '/you.js';
 import { hover, rows, hideTip, learn } from '/tips.js';
 
 export const CAT = {
@@ -99,19 +99,6 @@ function flagsCard(p) {
       : '<p class="ok">✓ Nothing needs a look</p>'}</section>`;
 }
 
-function tiles(p, r) {
-  const runs = p.runs || {};
-  const meter = (v, c) => `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="22" width="100" height="5" rx="2.5" fill="var(--wash)"/><rect x="0" y="22" width="${Math.max(0, Math.min(100, v * 100))}" height="5" rx="2.5" fill="${c}"/></svg>`;
-  return kpiTiles([
-    { label: 'Today', value: hm(r.today.minutes), unit: 'h', spark: spark(r.today.byHour, 'var(--s2)'), tip: 'Active time with agents today' },
-    { label: 'This week', value: hm(r.week.minutes), unit: 'h', spark: spark(r.week.days.map((d) => d.minutes), 'var(--s1)'), tip: 'Monday to today' },
-    { label: 'Handed over', value: `${pct(runs.long || 0, runs.prompts || 0)}%`, unit: 'of prompts', spark: meter(runs.prompts ? runs.long / runs.prompts : 0, 'var(--s7)'), tip: 'Prompts the agent worked on for 20+ steps on its own' },
-    { label: 'Ran smoothly', value: `${pct(runs.smooth || 0, runs.prompts || 0)}%`, unit: 'of prompts', spark: meter(runs.prompts ? runs.smooth / runs.prompts : 0, 'var(--good)'), tip: 'Prompts where no step failed' },
-    { label: 'Outside hours', value: `${pct(p.hours?.outside || 0, p.hours?.total || 0)}%`, unit: 'of time', spark: meter(p.hours?.total ? p.hours.outside / p.hours.total : 0, 'var(--s4)'), tip: 'Evenings, nights and weekends, in their own time zone' },
-  ]);
-}
-
-const WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const hh = (h) => `${String(h).padStart(2, '0')}:00`;
 const mins = (m) => (m >= 60 ? `${hm(m)} h` : m > 0 && m < 1 ? 'under 1 min' : `${Math.round(m)} min`);
 function attachTips(el, p, r, tools, st, fresh) {
@@ -119,16 +106,6 @@ function attachTips(el, p, r, tools, st, fresh) {
   const stEl = fresh.has('head') && el.querySelector('.pv-state');
   if (stEl) { stEl.dataset.learn = 'pv:state';
     hover(stEl, () => `<b>${esc(st.text)}</b>` + rows([['Last tool', esc(toolName(n.tool || '—'))], ['Last step', n.lastTs ? `${ago(n.lastTs)} ago` : '—'], ['Last prompt', n.promptTs ? `${ago(n.promptTs)} ago` : '—']])); }
-  const k = fresh.has('tiles') ? el.querySelectorAll('.pv-tiles .kpi') : [], plan = p.five_pct == null && p.week_pct == null;
-  const T = [
-    ['pv:today', () => `<b>Today</b>` + rows([['Active time', mins(r.today.minutes)], ['Busiest hour', (() => { const m = Math.max(...r.today.byHour); return m ? hh(r.today.byHour.indexOf(m)) : '—'; })()]])],
-    ['pv:week', () => `<b>This week</b>` + rows(r.week.days.map((d, i) => [WD[i], d.kind === 'ahead' ? '—' : mins(d.minutes)]))],
-    ['pv:handover', () => `<b>Handed over</b>` + rows([['Long runs (20+ steps)', `${runs.long || 0} of ${runs.prompts || 0}`], ['Longest run', `${runs.longest || 0} steps`]])],
-    ['pv:smooth', () => `<b>Ran smoothly</b>` + rows([['Without a failed step', `${runs.smooth || 0} of ${runs.prompts || 0}`], ['Tool calls failed', `${(p.toolFail || 0).toLocaleString()} of ${(p.tools || 0).toLocaleString()}`]])],
-    ...(plan ? [] : [['pv:plan', () => `<b>Plan used</b>` + rows([['5-hour allowance', `${Math.round(p.five_pct ?? 0)}%`], ['Weekly allowance', `${Math.round(p.week_pct ?? 0)}%`]])]]),
-    ['pv:hours', () => `<b>Outside hours</b>` + rows([['Weekdays 08–19', mins(p.hours?.day || 0)], ['Evenings 19–24', mins(p.hours?.evening || 0)], ['Nights 0–8', mins(p.hours?.night || 0)], ['Weekends', mins(p.hours?.weekend || 0)]])],
-  ];
-  k.forEach((node, i) => { if (!T[i]) return; node.removeAttribute('title'); node.dataset.learn = T[i][0]; hover(node, T[i][1]); });
   const tot = Object.values(p.mix || {}).reduce((a, b) => a + b, 0);
   for (const row of fresh.has('work') ? el.querySelectorAll('.wk-row') : []) {
     const kind = row.dataset.k, mine = tools.filter((t) => catOf(t.tool) === kind);
@@ -163,10 +140,9 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
     onDone: () => { if (held) { held = false; draw(); } }, onResize: () => requestAnimationFrame(draw) });
   const cardsHTML = (p, r, tools) => {
     const built = {
-      tiles: () => `<section class="kpis headline pv-tiles">${tiles(p, r)}</section>`,
       work: () => workCard(p, tools),
       recent: () => projectsCard(data.recent || [], links, range),
-      lines: () => (data.codeLines?.length ? '<section class="card pv-lines" data-learn="pv:lines"><header><h2>Code changes</h2></header><div id="pv-lines"></div></section>' : ''),
+      lines: () => (data.codeLines?.length || (cards && data.codeLines === undefined && globalThis.PuddleShape?.row('lines')) ? '<section class="card pv-lines" data-learn="pv:lines"><header><h2>Code changes</h2></header><div id="pv-lines"></div></section>' : ''),
       today: () => todayCard(r.today, { typical: r.typicalDay, nowHour: ((r.now + r.tz * 60_000) % 864e5) / 36e5 }),
       prompts: () => (you || cards ? '<section class="card pv-prompts" data-learn="pv:prompts"></section>' : ''),
       plan: () => (you || p.plan ? planCard(p.plan) : ''),
@@ -180,7 +156,8 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
       return { key: id, html, sig: html + (drawnBy[id]?.() || '') };
     });
   };
-  const parts = new Map();
+  const parts = new Map(), seen = new Set();
+  const waiting = { prompts: () => data.lastDay === undefined, lines: () => data.codeLines === undefined, calendar: () => data.daily === undefined };
   function patch(list) {
     const keep = new Set(), fresh = new Set();
     for (const { key, html, sig } of list) {
@@ -190,6 +167,10 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
       if (had?.node.parentNode === el && had.sig === sig) continue;
       const t = document.createElement('template'); t.innerHTML = html.trim();
       const node = t.content.firstElementChild; if (!node) continue;
+      const row = had?.node.parentNode === el ? had.node.style.gridRowEnd : globalThis.PuddleShape?.row(key);
+      if (row) node.style.gridRowEnd = row;
+      if (cards && waiting[key]?.()) globalThis.PuddleShape ? PuddleShape.hold(node, key) : (node.dataset.wait = '1');
+      else if (key !== 'head' && !seen.has(key)) { seen.add(key); node.classList.add('card-in'); setTimeout(() => node.classList.remove('card-in'), 600); }
       if (had?.node.parentNode === el) had.node.replaceWith(node);
       else { const next = list.slice(list.findIndex((x) => x.key === key) + 1).map((x) => parts.get(x.key)?.node).find((n) => n?.parentNode === el); el.insertBefore(node, next || null); }
       parts.set(key, { node, sig }); fresh.add(key);
@@ -237,9 +218,10 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
     const key = `joule-person:${location.pathname}${location.search}|${range}|${layout.visible('recent') ? '' : 'skip'}`;
     if (shown !== key) {
       shown = key;
-      try { const v = JSON.parse(sessionStorage.getItem(key) || 'null'); if (v && Date.now() - v.at < 30 * 60_000) { data = { ...v.data, ...cardData }; draw(); globalThis.PuddlePerf?.drawn(you ? 'me' : 'person'); } } catch {}
+      try { const v = JSON.parse(sessionStorage.getItem(key) || 'null'); if (v && Date.now() - v.at < 30 * 60_000) { Object.assign(cardData, v.cards || {}); data = { ...v.data, ...cardData }; draw(); globalThis.PuddlePerf?.drawn(you ? 'me' : 'person'); } } catch {}
     }
     lastParams = params;
+    if (cards) layout.ready.then(() => { for (const c of ['lines', 'prompts']) if (layout.visible(c)) fetchCard(c, params); });
     const bar = globalThis.PuddleBar;
     let res;
     try { res = await fetch(api(params) + (cards ? '&parts=core' : '') + (layout.visible('recent') ? '' : '&skip=recent')); } catch { bar?.fetched('fail'); return; }
@@ -252,14 +234,12 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
       el.innerHTML = `<section class="card" style="grid-column:1/-1">${res.status === 404 ? empty : '<p class="muted">Could not load this page.</p>'}</section>`; return;
     }
     const fresh = await res.json();
-    try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data: fresh })); } catch {  }
+    try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data: fresh, cards: cardData })); } catch {  }
     data = { ...fresh, ...cardData };
     draw();
     globalThis.PuddlePerf?.drawn(you ? 'me' : 'person'); globalThis.PuddleHeal?.drawn();
     if (cards) {
       await layout.ready;
-      if (layout.visible('lines')) fetchCard('lines', params);
-      if (layout.visible('prompts')) fetchCard('prompts', params);
       if (!layout.visible('calendar')) return;
       if (calSeen) fetchCard('calendar', params);
       else watchCal(params);
@@ -269,8 +249,11 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
   let calSeen = false, lastParams = null;
   async function fetchCard(name, params) {
     const r = await fetch(cards(name, params)).then((x) => (x.ok ? x.json() : null)).catch(() => null);
-    if (!r || !data) return;
-    Object.assign(cardData, r); Object.assign(data, r); draw(); globalThis.PuddlePerf?.card(name);
+    if (!r || params !== lastParams) return;
+    Object.assign(cardData, r);
+    try { const v = JSON.parse(sessionStorage.getItem(shown) || 'null'); if (v) sessionStorage.setItem(shown, JSON.stringify({ ...v, cards: cardData })); } catch {}
+    if (!data) return;
+    Object.assign(data, r); draw(); globalThis.PuddlePerf?.card(name);
   }
   let calParams = null;
   function watchCal(params) { calParams = params; nearCal(); }

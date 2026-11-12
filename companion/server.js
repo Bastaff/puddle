@@ -68,7 +68,7 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
   const personal = startPersonal({ home: dir, port: port + 1, log, listen, onError: (k) => errors.note(k), share: (action, body) => cloud.share(action, body),
     shareNext: () => { const on = Date.now() - shareAsk < 120_000; shareAsk = 0; return on; },
     layout: { get: () => cloud.layouts(), set: (b) => cloud.setLayout(b) },
-    site: { update: () => updater.state, install: () => updater.install(), work: (from) => workFromScan(getScan(), from), plan: () => labelPlans(plan.latest(), getScan()),
+    site: { update: () => updater.state, install: () => updater.install(), check: () => updater.check(), work: (from) => workFromScan(getScan(), from), plan: () => labelPlans(plan.latest(), getScan()),
       mac: () => ({ connected: cloud.connected(), email: cloud.email(), website: Boolean(serviceUrl(env)), version: currentVersion(), accounts: (getScan().accounts || []).filter((a) => Object.keys(a.surfaces || {}).length)
         .map(({ tool, kind, org, plan }) => ({ tool, kind, org, plan })) }),
       projectOf: () => { const m = new Map((getScan().sessions || []).map((x) => [x.id, x.repo || x.folder || null])); return (sid) => m.get(sid) || null; }, nav: () => cloud.nav(), link: (next) => cloud.dashboardLink(next), signOut: async () => { await cloud.signOut(); fs.rmSync(choicesFile, { force: true }); } } });
@@ -204,6 +204,10 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
         return r.status === 200 && r.data.url ? json(res, 200, { url: r.data.url }) : json(res, 200, { url: serviceUrl() ? `${serviceUrl()}/login` : null });
       }
       if (url.pathname === '/api/update') return json(res, 200, updater.state);
+      if (url.pathname === '/api/update/check' && req.method === 'POST') {
+        if (!fromPuddle(req)) return json(res, 403, { error: 'forbidden' });
+        return json(res, 200, await updater.check());
+      }
       if (url.pathname === '/api/update/install' && req.method === 'POST') {
         if (!fromPuddle(req)) return json(res, 403, { error: 'forbidden' });
         updater.install();

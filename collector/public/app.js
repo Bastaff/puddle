@@ -106,17 +106,6 @@ function niceMax(v) {
   return 10 * e;
 }
 
-function spark(values, color) {
-  const v = values.length ? values : [0];
-  const max = Math.max(...v, 1e-9);
-  const x = (i) => (v.length === 1 ? 50 : (i / (v.length - 1)) * 100);
-  const y = (n) => 28 - (n / max) * 24;
-  const line = v.map((n, i) => `${i ? 'L' : 'M'}${x(i).toFixed(2)},${y(n).toFixed(2)}`).join('');
-  return `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
-    <path d="${line}L100,30L0,30Z" fill="${color}" opacity="0.14"/>
-    <path d="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
-}
-
 function bars(el, keys, rowsByKey, series, o = {}) {
   const W = el.clientWidth || 400, H = el.clientHeight || 160;
   const m = { l: o.noY ? 2 : 36, r: 2, t: 6, b: o.noX ? 4 : 18 };
@@ -179,79 +168,7 @@ function ring(segments, value, unit, label, sev = '') {
 }
 const severity = (pct) => (pct >= 90 ? { color: 'var(--critical)', mark: '<span class="sev crit" aria-label="critical">●</span>' } : pct >= 70 ? { color: 'var(--warn)', mark: '<span class="sev warn" aria-label="high">▲</span>' } : { color: 'var(--s1)', mark: '' });
 
-function delta(cur, prev) {
-  if (!prev) return '';
-  const d = (cur - prev) / prev;
-  if (!isFinite(d) || Math.abs(d) < 0.005) return '<span class="delta">=</span>';
-  return `<span class="delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'}${Math.abs(d * 100) >= 100 ? Math.round(Math.abs(d * 100)) : Math.abs(d * 100).toFixed(0)}%</span>`;
-}
-
-const kpiValues = {};
-function renderKpis(d) {
-  const working = d.team.people.filter((p) => nowState(p).kind === 'work').length;
-  const h = { ...d.team.headline, activeNow: working };
-  const { keys, at } = bucketKeys(d.board.timeseries);
-  const pr = {}; for (const r of d.board.timeseries.prompts) pr[at(r.bucket)] = (pr[at(r.bucket)] || 0) + Number(r.n || 0);
-  const meter = (v, color) => `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="22" width="100" height="5" rx="2.5" fill="var(--wash)"/><rect x="0" y="22" width="${Math.max(0, Math.min(100, v * 100))}" height="5" rx="2.5" fill="${color}"/></svg>`;
-  const presence = `<svg viewBox="0 0 100 30" aria-hidden="true">${d.team.people.slice(0, 12).map((p, i) => { const st = nowState(p); return `<circle cx="${6 + i * 8}" cy="22" r="3.2" fill="${st.kind === 'work' ? st.color : 'var(--axis)'}"/>`; }).join('')}</svg>`;
-  const H = { minutes: d.team.headline.activeMinutes || 0, prev: d.team.headline.prevMinutes || 0, long: d.team.headline.longRuns || 0,
-    runs: d.team.headline.runPrompts || 0, smooth: d.team.headline.smoothPrompts || 0, outside: d.team.headline.outsideMinutes || 0, near: d.team.headline.nearLimit || 0 };
-  const share = (a, b) => (b ? Math.round((a / b) * 100) : 0);
-  const hm = (m) => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')}`;
-  const tiles = [
-    { id: 'active', label: 'People using it', value: `${h.active}/${h.people}`, spark: presence, tip: `People who sent at least one prompt in this period (${h.prevActive} in the previous one). Dots: who is working right now.` },
-    { id: 'time', label: 'Time with agents', value: hm(H.minutes), unit: 'h', delta: H.prev ? delta(H.minutes, H.prev) : '', spark: spark(keys.map((k) => pr[k] || 0), 'var(--s5)'),
-      tip: 'Active time: stretches of work with less than 5 minutes between steps; parallel conversations count once.' + (H.prev ? ` Previous period: ${hm(H.prev)} h.` : '') },
-    { id: 'handover', label: 'Handed over', value: `${share(H.long, H.runs)}%`, unit: 'of prompts', spark: meter(H.runs ? H.long / H.runs : 0, 'var(--s7)'),
-      tip: `Prompts where the agent took 20 or more steps on its own: ${nf.format(H.long)} of ${nf.format(H.runs)}. Higher = bigger tasks handed over.` },
-    { id: 'smooth', label: 'Ran smoothly', value: `${share(H.smooth, H.runs)}%`, unit: 'of prompts', spark: meter(H.runs ? H.smooth / H.runs : 0, 'var(--good)'),
-      tip: `Prompts where no step failed: ${nf.format(H.smooth)} of ${nf.format(H.runs)}. Some failures are normal (a test that fails before it is fixed).` },
-    { id: 'limits', label: 'Near a plan limit', value: `${H.near}`, unit: H.near === 1 ? 'person' : 'people', spark: meter(h.people ? H.near / h.people : 0, 'var(--warn)'), tip: 'People at 80% or more of their 5-hour or weekly subscription allowance (from Puddle\'s status line).' },
-    { id: 'hours', label: 'Outside hours', value: `${share(H.outside, H.minutes)}%`, unit: 'of time', spark: meter(H.minutes ? H.outside / H.minutes : 0, 'var(--s4)'),
-      tip: 'Active time in the evening (19–24), at night (0–8) or at the weekend, in each person\'s own time zone.' },
-  ];
-  if (!d.team.people.some((p) => p.five_pct != null || p.week_pct != null)) tiles.splice(tiles.findIndex((t) => t.id === 'limits'), 1);
-  const box = $('#kpis');
-  box.style.gridTemplateColumns = innerWidth > 1180 ? `repeat(${tiles.length}, minmax(0, 1fr))` : '';
-  if (box.children.length !== tiles.length || box.querySelector('.sk')) {
-    box.innerHTML = tiles.map((t) => `<div class="kpi" data-k="${t.id}" data-learn="kpi:${t.id}"><div class="k"><span>${t.label}</span><span class="dl"></span></div><div class="v"><span class="val"></span><small class="unit"></small></div><div class="sp"></div></div>`).join('');
-  }
-  tiles.forEach((t, i) => {
-    const el = box.children[i];
-    el.querySelector('.k span').textContent = t.label;
-    el.querySelector('.dl').innerHTML = t.delta || '';
-    el.querySelector('.unit').textContent = t.unit || '';
-    el.querySelector('.sp').innerHTML = t.spark;
-    kpiValues[t.id] = t.value;
-    if (!Fx.holding(t.id)) roll(el.querySelector('.val'), t.value);
-    hover(el, `<b>${t.label}</b>${esc(t.tip)}`);
-  });
-  Fx.milestones(tiles);
-}
-const rollKpi = (id) => { const el = document.querySelector(`.kpi[data-k="${id}"] .val`); if (el && kpiValues[id] != null) roll(el, kpiValues[id]); };
-
 const REDUCED = { get matches() { return !Motion.any(); } };
-function roll(el, text) {
-  const old = el.dataset.v;
-  if (old === text) return;
-  el.dataset.v = text;
-  clearTimeout(el._t);
-  if (old == null || REDUCED.matches) { el.textContent = text; return; }
-  const a = [...old], b = [...text], off = a.length - b.length;
-  let html = '', k = 0;
-  b.forEach((ch, i) => {
-    const prev = a[i + off];
-    if (/\d/.test(ch) && prev !== ch) {
-      const from = /\d/.test(prev || '') ? +prev : 0, to = +ch;
-      const steps = ((to - from + 10) % 10) || 10;
-      const seq = Array.from({ length: steps + 1 }, (_, j) => (from + j) % 10);
-      html += `<span class="reel"><span class="strip" style="--n:${steps};--i:${k++}">${seq.map((n) => `<span>${n}</span>`).join('')}</span></span>`;
-    } else html += esc(ch);
-  });
-  el.innerHTML = html;
-  el._t = setTimeout(() => { el.textContent = text; }, 1400);
-}
-
 const FEATS = [
   ['skills', 'S', 'Skills'], ['mcp', 'M', 'MCP connectors'], ['subagents', 'A', 'Subagents'],
   ['web', 'W', 'Web search'], ['edits', 'E', 'File edits'], ['mentions', '@', '@-mentions'], ['plugins', 'P', 'Plugins'],
@@ -633,7 +550,18 @@ async function renderMap(list) {
     s += `<g class="pin ${st.kind}" data-u="${esc(n.p.user_key)}" transform="translate(${n.x.toFixed(1)},${n.y.toFixed(1)})" style="--c:${st.color}">
       ${st.kind === 'work' ? `<circle class="halo" r="${R + 1}"/>` : ''}<circle r="${R}" fill="${colorOf(n.p.user_key)}"/><circle class="ring-out" r="${R}"/><text text-anchor="middle" dy="3.2">${esc(initials(n.p))}</text></g>`;
   }
-  el.innerHTML = s + '</svg>';
+  const prev = el._world && list.length ? el.querySelector('svg') : null, from = el._world;
+  el._world = list.length ? null : proj;
+  if (prev && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const [a, b] = from([x0, y1]), [c, d] = from([x1, y0]), k = Math.max(1, Math.min(8, Math.min(W / Math.max(1, c - a), H / Math.max(1, d - b))));
+    const tx = W / 2 - ((a + c) / 2) * k, ty = H / 2 - ((b + d) / 2) * k;
+    el.style.position = 'relative';
+    Object.assign(prev.style, { position: 'absolute', inset: '0', transformOrigin: '0 0' });
+    el.insertAdjacentHTML('beforeend', s + '</svg>');
+    const next = el.lastElementChild, ease = 'cubic-bezier(.3, .7, .2, 1)';
+    prev.animate([{ transform: 'none', opacity: 1 }, { transform: `translate(${tx}px, ${ty}px) scale(${k})`, opacity: 0 }], { duration: 700, easing: ease, fill: 'forwards' }).onfinish = () => prev.remove();
+    next.animate([{ opacity: 0, transform: `scale(${(1 / k).toFixed(3)})`, transformOrigin: '50% 50%' }, { opacity: 1, transform: 'none', transformOrigin: '50% 50%' }], { duration: 700, easing: ease });
+  } else el.innerHTML = s + '</svg>';
   for (const pin of el.querySelectorAll('.pin')) {
     const cur = () => el._list.find((x) => x.user_key === pin.dataset.u) || list.find((x) => x.user_key === pin.dataset.u);
     pin.onclick = () => { location.href = personHref(cur()); };
@@ -653,11 +581,6 @@ function updatePins(el, list) {
     if (st.kind === 'work' && !halo) pin.insertAdjacentHTML('afterbegin', `<circle class="halo" r="${+pin.querySelector('circle:not(.halo)').getAttribute('r') + 1}"/>`);
     else if (st.kind !== 'work' && halo) halo.remove();
   }
-}
-
-function bucketKeys(ts) {
-  const { len } = bounds(), n = Math.max(1, Math.round(len / (ts.step || DAY)));
-  return { keys: Array.from({ length: n }, (_, i) => i), at: (b) => Math.min(n - 1, b) };
 }
 
 const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
@@ -856,6 +779,9 @@ function banner(ok, title, detail) {
   return `<div class="banner ${ok ? 'ok' : 'warn'}" role="status"><span aria-hidden="true">${ok ? '✓' : '⚠'}</span><div><b>${esc(title)}</b>${detail ? esc(detail) : ''}</div></div>`;
 }
 
+const reveal = (c) => globalThis.PuddleShape?.ready(c);
+if (shownCard('map')) { reveal($('#map')?.closest('.card')); renderMap([]); }
+
 const cards = (() => {
   const LIST = [
     { key: 'calendar', url: '/api/cards/calendar', near: '[data-card="calendar"]', draw: () => renderCal(D) },
@@ -872,8 +798,9 @@ const cards = (() => {
     const r = await fetch(api(`${c.url}?${q}`)).then((x) => (x.ok ? x.json() : null)).catch(() => null);
     if (!r) return;
     got[c.key] = r;
+    try { sessionStorage.setItem(`${viewKey()}|${c.key}`, JSON.stringify({ at: Date.now(), r })); } catch {}
     if (c.key === 'calendar') calNewest = Math.max(calNewest, newest);
-    if (D) { Object.assign(D.team, r); c.draw(); globalThis.PuddlePerf?.card(c.key); }
+    if (D) { Object.assign(D.team, r); c.draw(); reveal(document.querySelector(c.near)); globalThis.PuddlePerf?.card(c.key); }
   };
   let calNewest = 0;
   const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => {
@@ -910,6 +837,9 @@ const cards = (() => {
   };
   return {
     data: () => Object.assign({}, ...Object.values(got)),
+    lazy: (k) => LIST.some((c) => c.key === k),
+    restore(key) { for (const c of LIST) { const v = recall(`${key}|${c.key}`); if (v?.r) got[c.key] = v.r; } },
+    got: (k) => k in got,
     refresh: () => { near(); for (const c of LIST) if (seen.has(c.key) && shown(c) && asked[c.key] !== paramsKey()) fetchCard(c); },
     live(feed) {
       for (const r of feed) newest = Math.max(newest, r.id || 0);
@@ -935,7 +865,9 @@ function fetchView(r, { prefetch = false } = {}) {
   if (!prefetch) { if (viewCtl && viewCtl.range !== r) viewCtl.abort(); viewCtl = new AbortController(); viewCtl.range = r; signal = viewCtl.signal; }
   const opt = { signal, ...(prefetch ? { headers: { 'x-puddle-prefetch': '1' } } : {}) };
   const get = (u) => fetch(api(u), opt).then((x) => (x.ok ? x.json() : Promise.reject(new Error(`view ${x.status}`))));
-  return Promise.all([get('/api/board?' + bq), get('/api/team?' + tq)]);
+  const b = get('/api/board?' + bq), t = get('/api/team?' + tq), both = Object.assign(Promise.all([b, t]), { team: t, boardIn: false });
+  b.then(() => { both.boardIn = true; }, () => {});
+  return both;
 }
 function prefetch(r) {
   if (r === state.range || inflight.has(r)) return;
@@ -949,7 +881,7 @@ function remember(key, v) {
   try {
     sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), ...v }));
     const keys = Object.keys(sessionStorage).filter((k) => k.startsWith('puddle-view:'));
-    if (keys.length > 12) for (const k of keys.sort((a, b) => (JSON.parse(sessionStorage.getItem(a)).at - JSON.parse(sessionStorage.getItem(b)).at)).slice(0, keys.length - 12)) sessionStorage.removeItem(k);
+    if (keys.length > 48) for (const k of keys.sort((a, b) => (JSON.parse(sessionStorage.getItem(a)).at - JSON.parse(sessionStorage.getItem(b)).at)).slice(0, keys.length - 48)) sessionStorage.removeItem(k);
   } catch {  }
 }
 function recall(key) { try { const v = JSON.parse(sessionStorage.getItem(key) || 'null'); return v && Date.now() - v.at < 30 * 60_000 ? v : null; } catch { return null; } }
@@ -960,6 +892,7 @@ async function load() {
       const key = viewKey();
       if (shownKey !== key) {
         const v = recall(key);
+        cards.restore(key);
         if (v) {
           D = { board: v.board, team: { ...v.team, ...cards.data() } };
           people = D.team.people.map((u) => ({ ...u, last_active: u.lastActive }));
@@ -968,7 +901,17 @@ async function load() {
         }
         shownKey = key;
       }
-      const [board, team] = await fetchView(state.range);
+      const view = fetchView(state.range);
+      let whole = false;
+      view.team?.then((team) => {
+        if (whole || view.boardIn || shownKey !== key) return;
+        D = { board: D?.board || null, team: { ...team, ...cards.data() } };
+        people = team.people.map((u) => ({ ...u, last_active: u.lastActive }));
+        for (const b of document.querySelectorAll('#range button')) b.setAttribute('aria-pressed', String(b.dataset.r === state.range));
+        render(); globalThis.PuddlePerf?.drawn('team');
+      }, () => {});
+      const [board, team] = await view;
+      whole = true;
       D = { board, team: { ...team, ...cards.data() } };
       lastLoad = Date.now();
       appliedUpTo = team.maxId || Math.max(0, ...(board.feed || []).map((r) => r.id || 0)); applied.clear(); addCounts(liveBuf);
@@ -1012,7 +955,7 @@ function renderProjects(d) {
   const ppl = new Map(d.team.people.map((p) => [p.user_key, p]));
   const scope = state.demo ? 'demo=1&' : TEAM ? `team=${encodeURIComponent(TEAM)}&` : '';
   const html = globalThis.recentHTML(list, { avatar: (k) => (ppl.get(k) ? avatar(ppl.get(k), 'sm') : ''), nameOf: (k) => displayName(ppl.get(k)), time: (m) => `${hmm(m)} h`, ago,
-    href: (c) => `/project?${scope}p=${encodeURIComponent(c.project)}&range=${encodeURIComponent(state.range)}&c=${encodeURIComponent(c.session_id)}&${fromHere()}`,
+    href: (c) => `/project?${scope}p=${encodeURIComponent(c.project)}&c=${encodeURIComponent(c.session_id)}&${fromHere()}`,
     seeAll: `/work?${scope}range=${encodeURIComponent(state.range)}&${fromHere()}` });
   if ($('#projects')._h !== html) { $('#projects')._h = html; $('#projects').innerHTML = html; }
 }
@@ -1026,25 +969,24 @@ function renderLines(d) {
 function render() {
   if (!D || document.body.classList.contains('leaving')) return;
   $('#grid')?.setAttribute('aria-busy', 'false');
+  for (const c of document.querySelectorAll('#grid > .card[data-wait]')) if (!cards.lazy(c.dataset.card) || cards.got(c.dataset.card)) reveal(c);
   if (shownCard('recent')) renderProjects(D);
   if (shownCard('lines')) renderLines(D);
-  if (shownCard('kpis')) renderKpis(D);
   renderPeople(D);
   if (shownCard('models')) renderModels(D.team.people);
   if (shownCard('calendar')) renderCal(D);
-  renderHealth(D.board.health);
+  if (D.board) renderHealth(D.board.health);
 }
 
 const Fx = (() => {
-  let seen = null, filterKey = '', floors = null;
-  const hold = new Set();
-  const tile = (id) => document.querySelector(`.kpi[data-k="${id}"]`);
+  let seen = null;
+  const row = (f) => { const p = people.find((x) => x.email === f.email); return (p && document.querySelector(`.brow.body[data-u="${CSS.escape(p.user_key)}"]`)) || $('.people-card'); };
   const T = {
-    prompt:  { ic: '✎', c: 'var(--s5)', to: () => tile('time'), sound: 'prompt', rolls: ['time'] },
-    coin:    { ic: '⚡︎', c: 'var(--s1)', to: () => tile('time'), sound: 'request', rolls: ['time'] },
-    tool:    { ic: '⚙︎', c: 'var(--s3)', to: (f) => { const p = people.find((x) => x.email === f.email); return (p && document.querySelector(`.brow.body[data-u="${CSS.escape(p.user_key)}"]`)) || $('.people-card'); }, sound: 'tool', rolls: [] },
-    fail:    { ic: '✕', c: 'var(--critical)', to: (f) => { const p = people.find((x) => x.email === f.email); return (p && document.querySelector(`.brow.body[data-u="${CSS.escape(p.user_key)}"]`)) || $('.people-card'); }, sound: 'fail', rolls: [], shake: true },
-    recover: { ic: '↻', c: 'var(--s1)', to: () => $('#status'), sound: 'recover', rolls: [] },
+    prompt:  { ic: '✎', c: 'var(--s5)', to: row, sound: 'prompt' },
+    coin:    { ic: '⚡︎', c: 'var(--s1)', to: row, sound: 'request' },
+    tool:    { ic: '⚙︎', c: 'var(--s3)', to: row, sound: 'tool' },
+    fail:    { ic: '✕', c: 'var(--critical)', to: row, sound: 'fail', shake: true },
+    recover: { ic: '↻', c: 'var(--s1)', to: () => $('#status'), sound: 'recover' },
   };
   const inView = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth; };
   const center = (el) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
@@ -1075,14 +1017,11 @@ const Fx = (() => {
       out.push({ type: 'coin', email, label: showCost() ? `+${usd(cost)}` : `+${compact(tok)}` });
     }
     if (fresh.some((e) => e.source === 'transcript')) out.push({ type: 'recover', email: null, label: '↻' });
-    const flights = out.slice(0, 7);
-    for (const f of flights) for (const id of T[f.type].rolls) hold.add(id);
-    return flights;
+    return out.slice(0, 7);
   }
 
   function run(flights) {
     flights.forEach((f, i) => setTimeout(() => fly(f), i * 230));
-    setTimeout(() => { for (const id of [...hold]) { hold.delete(id); rollKpi(id); } }, flights.length * 230 + 1400);
   }
 
   let flying = 0;
@@ -1124,7 +1063,6 @@ const Fx = (() => {
   function land(f, dst) {
     const t = T[f.type];
     Sound.play(t.sound, 0, f.email ? people.findIndex((p) => p.email === f.email) : null);
-    for (const id of t.rolls) { hold.delete(id); rollKpi(id); }
     if (t.after) t.after();
     if (!dst) return;
     if (!Motion.any()) return;
@@ -1132,7 +1070,7 @@ const Fx = (() => {
     dst.classList.remove('fx-hit'); void dst.offsetWidth;
     dst.classList.add('fx-hit');
     setTimeout(() => dst.classList.remove('fx-hit'), 1100);
-    if (t.shake) bump(dst, 0.04, 'x'); else if (dst.matches('.kpi')) bump(dst, 0.01);
+    if (t.shake) bump(dst, 0.04, 'x');
     if (f.type !== 'recover' && f.type !== 'coin') floatText(dst, f.type === 'tool' ? '✓' : f.label, t.c);
   }
 
@@ -1149,36 +1087,12 @@ const Fx = (() => {
       { duration: 1300, easing: 'cubic-bezier(.15,.7,.3,1)' }).onfinish = () => n.remove();
   }
 
-  function milestones(tiles) {
-    const key = state.range;
-    const stepOf = { spend: (v) => (v < 10 ? 1 : v < 100 ? 5 : v < 1000 ? 25 : 100), tokens: (v) => (v < 2e7 ? 1e6 : v < 2e8 ? 1e7 : 1e8) };
-    const now = {};
-    for (const t of tiles) if (stepOf[t.id] && t.raw != null) now[t.id] = Math.floor(t.raw / stepOf[t.id](t.raw)) * stepOf[t.id](t.raw);
-    if (key !== filterKey || !floors) { filterKey = key; floors = now; return; }
-    for (const id of Object.keys(now)) {
-      if (now[id] > floors[id]) {
-        const label = id === 'spend' ? usd(now[id]) : compact(now[id]);
-        setTimeout(() => celebrate(id, label), hold.has(id) ? 1300 : 200);
-      }
-    }
-    floors = now;
-  }
-  function celebrate(id, label) {
-    const el = tile(id);
-    if (!el) return;
-    Sound.play('success');
-    el.classList.remove('fx-shine'); void el.offsetWidth; el.classList.add('fx-shine');
-    setTimeout(() => el.classList.remove('fx-shine'), 1600);
-    floatText(el, `★ ${label}`, 'var(--s4)');
-  }
-
   function hear(feed) {
     const flights = plan(feed);
-    hold.clear();
     flights.forEach((f, i) => Sound.play(T[f.type].sound, i * 260, f.email ? people.findIndex((p) => p.email === f.email) : null));
   }
 
-  return { plan, run, hear, milestones, holding: (id) => hold.has(id), reset() { seen = null; floors = null; hold.clear(); } };
+  return { plan, run, hear, reset() { seen = null; } };
 })();
 
 const soundBtn = $('#sound-btn');
@@ -1225,7 +1139,7 @@ async function act(a) {
   if (a === 'cost') {
     state.cost = !showCost(); save();
         toast(showCost() ? '$ Cost estimates on (API list prices)' : 'Cost hidden — behaviour only');
-    Fx.reset(); render(); Fx.plan(D?.board.feed || []);
+    Fx.reset(); render(); Fx.plan(D?.board?.feed || []);
     return;
   }
   if (a === 'demo') {

@@ -2,7 +2,6 @@
   const SIZES = ['s', 'm', 'l', 'full'], LABEL = { s: 'S', m: 'M', l: 'L', full: 'Full' };
   const PAGES = {
     team: [
-      { id: 'kpis', title: 'At a glance', sizes: ['full'], size: 'full' },
       { id: 'people', title: 'Team', sizes: ['l', 'full'], size: 'l' },
       { id: 'prompts', title: 'Prompt by prompt', sizes: ['m', 'l', 'full'], size: 'full' },
       { id: 'issues', title: 'Needs a look', sizes: ['s', 'm', 'l'], size: 's' },
@@ -14,7 +13,6 @@
       { id: 'features', title: 'Features in use', sizes: ['m', 'l', 'full'], size: 'l' },
     ],
     person: [
-      { id: 'tiles', title: 'At a glance', sizes: ['full'], size: 'full' },
       { id: 'work', title: 'What the agent worked on', sizes: ['m', 'l', 'full'], size: 'l' },
       { id: 'plan', title: 'Plan limits', sizes: ['s', 'm'], size: 's' },
       { id: 'size', title: 'Conversation size', sizes: ['s', 'm'], size: 's' },

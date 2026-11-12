@@ -1,5 +1,4 @@
 export const SHARE_PARTS = [
-  { id: 'tiles', title: 'At a glance', line: 'Today, this week, handed over, ran smoothly', on: true },
   { id: 'today', title: 'Today', line: 'Your day hour by hour, over your usual day', on: true },
   { id: 'work', title: 'What the agent worked on', short: 'Kinds of work', line: 'Kinds of work as shares', sensitive: 'Names the tools behind each kind of work, like the MCP servers you use.', on: false },
   { id: 'calendar', title: 'Tokens per day', line: 'A square a day, the last months', on: false },

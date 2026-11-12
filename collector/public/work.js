@@ -24,7 +24,7 @@ const short = (n) => (/^[a-z0-9.-]+\.[a-z]+\/.+\/.+/i.test(n) ? n.split('/').pop
 const scope = demo ? 'demo=1&' : team ? `team=${encodeURIComponent(team)}&` : '';
 globalThis.PuddleBar?.title('Conversations');
 const untitled = (c) => (c.last ? `Conversation on ${new Date(c.last).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}` : 'Conversation');
-const open = (c) => `/project?${scope}p=${encodeURIComponent(c.project)}&range=${range}&c=${encodeURIComponent(c.session_id)}&${globalThis.PuddleBar?.from('Conversations') || ''}`;
+const open = (c) => `/project?${scope}p=${encodeURIComponent(c.project)}&c=${encodeURIComponent(c.session_id)}&${globalThis.PuddleBar?.from('Conversations') || ''}`;
 
 function remember() {
   const u = new URL(location.href);

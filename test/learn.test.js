@@ -15,6 +15,6 @@ test('learn mode explains built-in tools, MCP tools and dashboard parts in plain
   assert.match(mcp, /several steps in one go/);
   assert.match(LEARN.tool('mcp__linear__list_issues'), /Linear.*searches or lists/);
   assert.match(LEARN.tool('SomethingNew'), /tool Claude used/);
-  for (const k of ['card:team', 'kpi:tokens', 'col:autonomy', 'cat:mcp', 'flag:friction', 'feat:subagents', 'mix:Effort', 'bar:learn', 'bar:arrange']) assert.ok(LEARN.explain(k).length > 40, k);
+  for (const k of ['card:team', 'card:prompts', 'col:autonomy', 'cat:mcp', 'flag:friction', 'feat:subagents', 'mix:Effort', 'bar:learn', 'bar:arrange']) assert.ok(LEARN.explain(k).length > 40, k);
   assert.ok(!LEARN.tool('<img src=x>').includes('<img'), 'tool names are escaped');
 });

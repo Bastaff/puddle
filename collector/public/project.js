@@ -1,8 +1,8 @@
 const q = new URLSearchParams(location.search), team = q.get('team'), demo = q.get('demo') === '1', name = q.get('p') || '';
 const RANGES = { '1d': ['1D', 1], '7d': ['7D', 7], '30d': ['30D', 30], '90d': ['90D', 90] };
 const PER = 25;
-let range = RANGES[q.get('range')] ? q.get('range') : '1d', data = null, sel = q.get('c') || null, cpage = 0;
-let win = { from: Date.now() - 864e5, to: Date.now() };
+let range = RANGES[q.get('range')] ? q.get('range') : '7d', data = null, sel = q.get('c') || null, cpage = 0;
+let win = { from: Date.now() - 7 * 864e5, to: Date.now() };
 const el = document.getElementById('prj');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const usd = (v) => { const x = Number(v) || 0; return `$${x < 10 ? x.toFixed(2) : Math.round(x).toLocaleString()}`; };

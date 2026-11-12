@@ -24,6 +24,14 @@ function sixHours(el, l, typical) {
     <div class="pp-ticks">${ticks}</div>`;
 }
 
+let asked = 0;
+const fit = () => {
+  if (!inApp) return;
+  const h = Math.ceil($('#pp').getBoundingClientRect().height + 28);
+  if (Math.abs(h - asked) < 2) return;
+  asked = h; location.href = `/__joule/popover_h_${h}`;
+};
+if (inApp) document.documentElement.classList.add('pp-fit');
 let busy = false;
 async function draw() {
   if (busy) return; busy = true;
@@ -49,6 +57,7 @@ async function draw() {
       ${u?.available ? `<div class="pp-upd"><span><b>New Puddle ready</b> · ${u.error ? esc(u.error) : u.status === 'installing' ? 'installing, it restarts in a moment' : 'takes a minute'}</span>${u.status === 'installing' ? '' : '<button type="button" class="btn" id="upd">Install</button>'}</div>` : ''}
       <div class="pp-brand"><img src="/brand/icon.svg" width="15" height="15" alt=""><b>Puddle</b>${u?.current ? `<small>${esc(u.current)}</small>` : ''}</div>`;
     const day = $('#you-day'); if (day) { day.classList.add('pp-six'); sixHours(day, t.last6, r.typicalDay); }
+    fit();
     $('#me').onclick = () => act('open_me', '/');
     if ($('#team')) $('#team').onclick = (e) => { if (e.currentTarget.getAttribute('aria-disabled') === 'true') return; act(pop.connected ? 'open_dashboard' : 'open_settings', pop.connected ? '/go?to=team' : null); };
     $('#settings').onclick = () => act(pop?.connected ? 'open_account' : 'open_settings', '/mac');

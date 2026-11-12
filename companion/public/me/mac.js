@@ -28,7 +28,24 @@
     <section class="card"><form class="srow" id="join"><div class="txt"><b>Invite link</b><span class="muted">Paste the link you were sent; the team then sees all your agent work, your earlier work included</span></div>
       <div class="acts"><input type="text" id="link" placeholder="https://…/join/…" autocomplete="off" required><button class="btn2">Join</button></div></form></section>
     <p class="err" id="join-err">${esc(new URLSearchParams(location.search).get('err') || '')}</p>` : ''}
-    <p class="muted small version-line">Puddle ${esc((mac.version || 'from source').replace(/-(\d+)$/, ' ($1)'))}</p>`;
+    <h2>Updates</h2>
+    <section class="card"><div class="srow" id="upd-row"><div class="txt"><b>Puddle ${esc((mac.version || 'from source').replace(/-(\d+)$/, ' ($1)'))}</b><span class="muted" id="upd-say">Puddle checks for a new version every 15 minutes</span></div>
+      <div class="acts"><button type="button" class="btn2 ghost" id="upd-check">Check for updates</button></div></div></section>`;
   $('#mac').setAttribute('aria-busy', 'false');
+  const post = (u) => fetch(u, { method: 'POST', headers: { 'x-puddle': '1' } }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const showUpdate = (u, asked) => {
+    const say = $('#upd-say'), acts = $('#upd-row .acts');
+    if (!u) { say.textContent = 'Could not reach the update server. Try again in a moment.'; return; }
+    if (u.status === 'installing' || u.status === 'restarting') { say.textContent = 'Installing. Puddle restarts in a moment.'; acts.innerHTML = ''; return; }
+    if (u.available) {
+      say.textContent = u.error || `Puddle ${u.latest} is ready. Installing takes a minute and Puddle restarts by itself.`;
+      acts.innerHTML = '<button type="button" class="btn2" id="upd-install">Install</button>';
+      $('#upd-install').onclick = async () => { showUpdate({ ...u, status: 'installing' }); await post('/api/update/install'); };
+      return;
+    }
+    say.textContent = asked ? `You have the newest Puddle. Checked just now.` : u.checked ? `You have the newest Puddle. Checked ${new Date(u.checked).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.` : 'Puddle checks for a new version every 15 minutes';
+  };
+  fetch('/api/popover').then((r) => r.json()).then((p) => p?.update && showUpdate(p.update, false)).catch(() => {});
+  $('#upd-check').onclick = async (e) => { const b = e.currentTarget; b.disabled = true; b.textContent = 'Checking…'; showUpdate(await post('/api/update/check'), true); b.disabled = false; b.textContent = 'Check for updates'; };
   $('#join')?.addEventListener('submit', (e) => { e.preventDefault(); location.href = `${app}&join=${encodeURIComponent($('#link').value.trim())}`; });
 })();

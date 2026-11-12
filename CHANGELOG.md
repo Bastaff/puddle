@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.4
+
+- **Pages load faster and never jump:** every page draws its cards right where they end up, at their final size, and
+  each one fades in as its numbers arrive. Going back to a page you just saw shows it at once and freshens it in place.
+- **The map is there straight away** and zooms to your team when everyone's location is in.
+- **All your teams in the top bar** when the window is wide enough.
+- **Check for updates** in the menu bar menu and in Settings → This Mac.
+- **The popover fits its content,** so the update notice is never cut off.
+- **No more flicker of the Puddle name** when switching between Me and a team.
+
 ## 0.0.3
 
 - **No more slowdowns from long conversations:** a conversation whose log grew past 512 MB made Puddle use over a

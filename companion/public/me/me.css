@@ -1,19 +1,5 @@
 .me-tag { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; background: var(--ink); color: var(--page); border-radius: 6px; padding: 1px 6px; margin-left: 2px; }
 .personal .menu [data-act="demo"], .personal [data-act="test"], .personal [data-act="reset"] { display: none !important; }
-.brag { grid-column: 1 / -1; }
-.brag .kpi { background: var(--raised); }
-.brag > header { display: flex; align-items: center; gap: 10px; }
-.brag > header .share { margin-left: auto; }
-.brag > header h2 { margin-right: 0; }
-@media (max-width: 900px) { .brag .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .brag .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.brag-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
-.bt { background: var(--surface); border-radius: calc(16px * var(--sq)); padding: 10px 12px; display: flex; flex-direction: column; min-width: 0; box-shadow: var(--shadow-sm, none); }
-.bt .bl { font-size: 10.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
-.bt b { font-size: 22px; font-weight: 900; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bt small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 900px) { .brag-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .brag-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .personal .where { display: none !important; }
 .personal .issues { grid-column: 1 / -1 !important; }
 

@@ -1,6 +1,5 @@
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const hm = (min) => { min = Math.max(0, Math.round(min || 0)); return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`; };
-const WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const WD1 = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const hh = (h) => `${String(h).padStart(2, '0')}:00`;
 
@@ -15,18 +14,6 @@ export function spark(values, color) {
     <path d="${line}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
 }
 export const kpiTiles = (tiles) => tiles.map((t) => `<div class="kpi"${t.tip ? ` title="${esc(t.tip)}"` : ''}><div class="k"><span>${esc(t.label)}</span></div><div class="v${String(t.value).length > 8 ? ' long' : ''}"><span class="val">${esc(t.value)}</span>${t.unit ? `<small class="unit">${esc(t.unit)}</small>` : ''}</div><div class="sp">${t.spark || ''}</div></div>`).join('');
-
-function youTiles(d) {
-  const t = d.today, w = d.week, s = d.streak || { current: 0, best: 0 };
-  return kpiTiles([
-    { label: 'Today', value: hm(t.minutes), spark: spark(t.byHour, 'var(--s2)'), tip: 'Active time with agents today (pauses over 5 minutes don\'t count)' },
-    { label: 'Likely today', value: t.projected ? hm(t.projected.mid) : '–', spark: spark(d.typicalDay, 'var(--s4)'), tip: t.projected ? `From your last ${t.samples} ${WD[t.weekday]}s` : 'Forecasts start after 3 weeks of history' },
-    { label: 'This week', value: hm(w.minutes), spark: spark(w.days.map((x) => x.minutes), 'var(--s1)'), tip: w.usual != null ? `Your usual week: ${hm(w.usual)}` : 'Monday to today' },
-    { label: 'Streak', value: String(s.current), unit: s.current === 1 ? 'day' : 'days', spark: spark(d.activeDaysPerWeek.map((x) => x.days || 0), 'var(--s3)'), tip: `Days in a row with agent work · best ${s.best}` },
-    { label: 'Focus blocks', value: String(d.focus.week), unit: 'this week', spark: '', tip: '25+ minutes of continuous work' },
-    { label: 'Longest focus', value: hm(d.focus.longest), spark: '', tip: 'Longest continuous stretch, last 90 days' },
-  ]);
-}
 
 export function todayCard(t, { typical = null, nowHour = null } = {}) {
   let pill = '';
@@ -89,9 +76,8 @@ export function habitsCard(r) {
   </section>`;
 }
 
-export function renderYou(el, data, { streak = data.streak } = {}) {
-  el.innerHTML = `<section class="kpis headline" aria-label="You at a glance">${youTiles({ ...data, streak })}</section>`
-    + todayCard(data.today, { typical: data.typicalDay, nowHour: ((data.now + data.tz * 60_000) % 864e5) / 36e5 }) + weekCard(data.week) + habitsCard(data) + tokensCard();
+export function renderYou(el, data) {
+  el.innerHTML = todayCard(data.today, { typical: data.typicalDay, nowHour: ((data.now + data.tz * 60_000) % 864e5) / 36e5 }) + weekCard(data.week) + habitsCard(data) + tokensCard();
   const nowHour = ((data.now + data.tz * 60_000) % 864e5) / 36e5;
   dayChart(el.querySelector('#you-day'), data.typicalDay, data.today.byHour, nowHour);
   mountTokens(el, data);

@@ -1,3 +1,5 @@
+import { fastSchema, unmarkSession, unmarkUser, pqSession, pqUser, pfRefresh, promptIdsOf } from './fast.js';
+
 export const QUARTER = 900_000;
 export const ROLLUP_VERSION = 4;
 
@@ -78,7 +80,7 @@ CREATE TABLE IF NOT EXISTS task_rollup (
   agent_tokens ${BIG}, min_ts ${BIG}, max_ts ${BIG}
 );
 CREATE INDEX IF NOT EXISTS task_rollup_user_bucket ON task_rollup(user_key, bucket);
-CREATE INDEX IF NOT EXISTS task_rollup_session_bucket ON task_rollup(session_id, bucket);`;
+CREATE INDEX IF NOT EXISTS task_rollup_session_bucket ON task_rollup(session_id, bucket);${fastSchema(dialect)}`;
 }
 
 function insertGrouped(S, cond) {
@@ -89,11 +91,14 @@ function insertGrouped(S, cond) {
 
 export async function rebuildRollup(S) {
   await S.run(`DELETE FROM event_rollup`);
+  await S.run(`DELETE FROM event_day_done`);
+  await S.run(`DELETE FROM rollup_state WHERE k = 'pq'`);
   await S.run(insertGrouped(S, '1 = 1'));
   await S.run(`DELETE FROM active_run`);
   await S.run(insertRuns(S, '1 = 1'));
   await S.run(`DELETE FROM prompt_rollup`);
   await S.run(insertPrompts(S, '1 = 1'));
+  await S.run(`DELETE FROM prompt_facts`);
   await S.run(`DELETE FROM task_rollup`);
   await S.run(insertTasks(S, '1 = 1'));
   await S.run(`INSERT INTO rollup_state (k, v) VALUES ('version', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`, [String(ROLLUP_VERSION)]);
@@ -105,8 +110,12 @@ export async function rollupVersion(S) {
 export async function rebuildWindow(S, userKey, from, to) {
   await S.run(`DELETE FROM event_rollup WHERE user_key IS NOT DISTINCT FROM ? AND bucket >= ? AND bucket < ?`, [userKey, from, to]);
   await S.run(insertGrouped(S, `e.user_key IS NOT DISTINCT FROM ? AND e.ts >= ? AND e.ts < ?`), [userKey, from, to]);
+  await unmarkUser(S, userKey, from, to);
+  await pqUser(S, userKey, from, to);
+  const was = await promptIdsOf(S, `user_key IS NOT DISTINCT FROM ? AND bucket >= ? AND bucket < ?`, [userKey, from, to]);
   await S.run(`DELETE FROM prompt_rollup WHERE user_key IS NOT DISTINCT FROM ? AND bucket >= ? AND bucket < ?`, [userKey, from, to]);
   await S.run(insertPrompts(S, `e.user_key IS NOT DISTINCT FROM ? AND e.ts >= ? AND e.ts < ?`), [userKey, from, to]);
+  await pfRefresh(S, [...was, ...await promptIdsOf(S, `user_key IS NOT DISTINCT FROM ? AND bucket >= ? AND bucket < ?`, [userKey, from, to])]);
   await S.run(`DELETE FROM task_rollup WHERE user_key IS NOT DISTINCT FROM ? AND bucket >= ? AND bucket < ?`, [userKey, from, to]);
   await S.run(insertTasks(S, `e.user_key IS NOT DISTINCT FROM ? AND e.ts >= ? AND e.ts < ?`), [userKey, from, to]);
 }
@@ -130,15 +139,23 @@ export async function refreshRollup(S, keys) {
     if (k.session_id != null) {
       await S.run(`DELETE FROM event_rollup WHERE session_id = ? AND bucket = ?`, [k.session_id, k.bucket]);
       await S.run(insertGrouped(S, `e.session_id = ? AND e.ts >= ? AND e.ts < ?`), [k.session_id, ...at]);
+      await unmarkSession(S, k.session_id, k.bucket);
+      await pqSession(S, k.session_id, k.bucket);
+      const was = await promptIdsOf(S, `session_id = ? AND bucket = ?`, [k.session_id, k.bucket]);
       await S.run(`DELETE FROM prompt_rollup WHERE session_id = ? AND bucket = ?`, [k.session_id, k.bucket]);
       await S.run(insertPrompts(S, `e.session_id = ? AND e.ts >= ? AND e.ts < ?`), [k.session_id, ...at]);
+      await pfRefresh(S, [...was, ...await promptIdsOf(S, `session_id = ? AND bucket = ?`, [k.session_id, k.bucket])]);
       await S.run(`DELETE FROM task_rollup WHERE session_id = ? AND bucket = ?`, [k.session_id, k.bucket]);
       await S.run(insertTasks(S, `e.session_id = ? AND e.ts >= ? AND e.ts < ?`), [k.session_id, ...at]);
     } else {
       await S.run(`DELETE FROM event_rollup WHERE session_id IS NULL AND user_key IS NOT DISTINCT FROM ? AND bucket = ?`, [k.user_key, k.bucket]);
       await S.run(insertGrouped(S, `e.session_id IS NULL AND e.user_key IS NOT DISTINCT FROM ? AND e.ts >= ? AND e.ts < ?`), [k.user_key, ...at]);
+      await unmarkUser(S, k.user_key, k.bucket, k.bucket + QUARTER);
+      await pqUser(S, k.user_key, k.bucket, k.bucket + QUARTER);
+      const was = await promptIdsOf(S, `session_id IS NULL AND user_key IS NOT DISTINCT FROM ? AND bucket = ?`, [k.user_key, k.bucket]);
       await S.run(`DELETE FROM prompt_rollup WHERE session_id IS NULL AND user_key IS NOT DISTINCT FROM ? AND bucket = ?`, [k.user_key, k.bucket]);
       await S.run(insertPrompts(S, `e.session_id IS NULL AND e.user_key IS NOT DISTINCT FROM ? AND e.ts >= ? AND e.ts < ?`), [k.user_key, ...at]);
+      await pfRefresh(S, [...was, ...await promptIdsOf(S, `session_id IS NULL AND user_key IS NOT DISTINCT FROM ? AND bucket = ?`, [k.user_key, k.bucket])]);
       await S.run(`DELETE FROM task_rollup WHERE session_id IS NULL AND user_key IS NOT DISTINCT FROM ? AND bucket = ?`, [k.user_key, k.bucket]);
       await S.run(insertTasks(S, `e.session_id IS NULL AND e.user_key IS NOT DISTINCT FROM ? AND e.ts >= ? AND e.ts < ?`), [k.user_key, ...at]);
     }

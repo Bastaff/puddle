@@ -263,6 +263,10 @@ body.learn [data-learn] { cursor: help; }
 body.learn h2[data-learn] { text-decoration: underline dotted var(--gold-2); text-underline-offset: 3px; text-decoration-thickness: 2px; }
 .learn-x b { display: inline; font-weight: 800; }
 
-main.grid[aria-busy="true"] .card { position: relative; min-height: 180px; }
-main.grid[aria-busy="true"] .card > :not(header) { visibility: hidden; }
-main.grid[aria-busy="true"] .card::after { content: ""; position: absolute; left: 18px; right: 18px; top: 54px; bottom: 18px; border-radius: 12px; background: var(--wash); animation: sk-pulse 1.4s ease-in-out infinite; }
+body:not(.leaving) main.grid[aria-busy="true"] .card, .card[data-wait] { position: relative; min-height: 180px; }
+body:not(.leaving) main.grid[aria-busy="true"] .card > :not(header), .card[data-wait] > :not(header) { visibility: hidden; }
+.card.card-in > :not(header) { animation: card-in .32s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes card-in { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .card.card-in > :not(header) { animation: none; } }
+.people-card[data-wait]::after { top: 106px !important; background: repeating-linear-gradient(to bottom, var(--wash) 0 41px, transparent 41px 51px) !important; }
+body:not(.leaving) main.grid[aria-busy="true"] .card::after, .card[data-wait]::after { content: ""; position: absolute; left: 18px; right: 18px; top: 54px; bottom: 18px; border-radius: 12px; background: var(--wash); animation: sk-pulse 1.4s ease-in-out infinite; }

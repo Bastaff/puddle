@@ -1,6 +1,6 @@
 {
   "name": "puddle",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Puddle: a Mac menu bar app and a team website showing how people use their coding agents (Claude Code, Codex). Counts and timings only, never prompts or code",
   "license": "MIT",
   "type": "module",

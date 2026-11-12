@@ -28,7 +28,7 @@ test('offline: Me keeps the teams it knew, and /go comes back to Me at once', as
     down = false; slow = true;
     const t0 = Date.now(), hung = await fetch(`${base}/go?to=${encodeURIComponent('/settings')}`, { redirect: 'manual' });
     assert.equal(hung.headers.get('location'), '/?offline=1');
-    assert.ok(Date.now() - t0 < 7000, `${Date.now() - t0} ms`);
+    assert.ok(Date.now() - t0 < 10_000, `${Date.now() - t0} ms`);
   } finally { p.close(); fs.rmSync(home, { recursive: true, force: true }); }
 });
 

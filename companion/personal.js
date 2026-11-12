@@ -138,7 +138,6 @@ export function startPersonal({ home, port = 4601, log = () => {}, listen = true
     .replace(/<title>[^<]*<\/title>/, '<title>Puddle · Me</title><link rel="stylesheet" href="/me/me.css">')
     .replace('<b>Usage</b>', '<b>Puddle</b> <span class="me-tag">Me</span>')
     .replace('<h2 data-learn="card:team">Team</h2>', '<h2 data-learn="card:team">Me</h2>')
-    .replace('<section class="kpis headline" id="kpis" aria-label="Team at a glance"></section>', '<section class="kpis headline" id="kpis" aria-label="You at a glance"></section><section class="card brag" id="brag" aria-label="Highlights" hidden></section>')
     .replace('<b>Puddle</b> <span class="me-tag">Me</span>', '<a href="/" class="me-back"><b>Puddle</b> <span class="me-tag">Me</span></a>');
 
   const server = http.createServer(async (req, res) => {
@@ -208,6 +207,10 @@ fetch('/api/app-signout', { method: 'POST', headers: { 'x-puddle': '1' } }).then
         const m = site?.mac?.() || {}, nav = lastNav || null;
         return json(res, 200, { connected: Boolean(m.connected), website: Boolean(m.website), team: nav?.teams?.[0]?.name || null, update: site?.update?.() || null });
       }
+      if (p === '/api/update/check' && req.method === 'POST') {
+        if (!fromPuddle(req) || !site?.check) return json(res, 403, { error: 'forbidden' });
+        return json(res, 200, await site.check());
+      }
       if (p === '/api/update/install' && req.method === 'POST') {
         if (!fromPuddle(req) || !site?.install) return json(res, 403, { error: 'forbidden' });
         site.install(); return json(res, 202, site.update());
@@ -258,7 +261,7 @@ fetch('/api/app-signout', { method: 'POST', headers: { 'x-puddle': '1' } }).then
       const base = p.startsWith('/me/') ? ME : PUBLIC;
       const file = path.join(base, path.normalize(p.startsWith('/me/') ? p.slice(4) : p).replace(/^(\.\.[/\\])+/, ''));
       if (!file.startsWith(base + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return json(res, 404, { error: 'not found' });
-      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
+      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': /\/vendor\/outfit-[\w-]+\.woff2$/.test(p) ? 'public, max-age=604800' : 'no-store' });
       fs.createReadStream(file).pipe(res);
     } catch (e) { log(`personal: ${e.stack || e.message}`); if (!res.headersSent) json(res, 500, { error: 'internal error' }); }
   });

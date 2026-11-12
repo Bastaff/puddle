@@ -5,7 +5,7 @@ with their agents, never judgements about people.
 
 ## Layout
 - **Top bar:** the menu (Me, each team), the date range (1D, 7D, 30D, 90D), Arrange, learn mode (?), theme and Settings.
-- **Headline tiles** first, then the cards, which each person arranges for themselves (Arrange: move, size S/M/L/Full,
+- **The cards**, which each person arranges for themselves (Arrange: move, size S/M/L/Full,
   hide; kept with their account, `collector/public/layout.js`): Team, Needs a look, Where the team is, Models · effort ·
   client, Active projects, Code changes, Tokens per day, Features in use, What the team does.
 - **Details:** hover or tap anything; Learn mode explains every part in plain words.
@@ -13,16 +13,7 @@ with their agents, never judgements about people.
 ## Purpose
 Built for a project manager reading how a team uses Claude Code: facts about behaviour, not judgements about people. It keeps the warmth of the reference images (cream paper, ink outlines, pastel tints, tactile chunky edges) without characters or gamification.
 
-1. **Headline row:** six tiles, each answering a question a team lead asks:
-   - **People using it:** who sent at least one prompt in the period, with dots for who is working right now.
-   - **Time with agents:** active time (stretches with less than 5 minutes between steps; parallel conversations count once), against the previous period.
-   - **Handed over:** the share of prompts where the agent took 20 or more steps on its own.
-   - **Ran smoothly:** the share of prompts where no step failed.
-   - **Near a plan limit:** people at 80% or more of a 5-hour or weekly limit (only shown once anyone's plan limits are known).
-   - **Outside hours:** active time in the evening, at night or at the weekend, in each person's own time zone.
-
-   With a person focused, the tiles describe only that person.
-2. **Team board**, the core. Each row is meant to be read without reading text:
+1. **Team board**, the core. Each row is meant to be read without reading text:
    - **Right now:** a coloured tile with an icon showing what Claude is doing for that person (reading, editing, running commands, web, delegating to agents, MCP, or thinking), pulsing while they work. It turns grey when the person is idle or away.
    - **Activity lane:** one column per time slice across the range. Height is tool calls, on the same scale for everyone, and colour is the kind of work. Ink ticks are prompts and red marks are failures; a green line shows they are working now.
    - **Kind of work:** a stacked bar of tool calls by kind, plus the dominant kind.
@@ -31,7 +22,7 @@ Built for a project manager reading how a team uses Claude Code: facts about beh
    - **Fails:** a ring whose red wedge is the tool failure rate.
 
    Sort by any header (working people come first by default). Click a row to focus the dashboard on that person, and hover any cell for the numbers.
-3. **Needs a look** sits top-right on desktop, first on a phone and under the board on a tablet. The rules live in `collector/flags.js`. Each one needs enough data, compares against the person's own rhythm or the rest of the team, and stays silent when unsure:
+2. **Needs a look** sits top-right on desktop, first on a phone and under the board on a tablet. The rules live in `collector/flags.js`. Each one needs enough data, compares against the person's own rhythm or the rest of the team, and stays silent when unsure:
 
    | Flag | Fires when | Never fires for |
    |---|---|---|
@@ -52,10 +43,10 @@ Built for a project manager reading how a team uses Claude Code: facts about beh
 
    **Synthetic check:** `node scripts/flag-eval.js 10` builds 10 random demo teams with planted problems, plus decoys that must stay silent (an occasional user's normal breaks, a holiday, normal Bash failures, the odd long session) and reports precision and recall. Current result: 100% / 100%. The demo team shows one example of each planted problem.
 
-4. **Person focus:** the avatar chips in the top bar (or a board row, map pin or flag) focus one person. The headline, features, work mix, models and flags then describe only them, and the board dims everyone else. Click ✕ on the name chip to go back to everyone.
-5. **Features in use:** one row per feature (skills, MCP, subagents, web, edits, @-mentions, plugins), showing how many people use it and who. With a person focused, it shows how often that person used each one.
-6. **Map** (no header, edge to edge), framed around the team's cities. Pins never overlap; they are nudged apart with a thin line back to their city.
-7. **Team tokens** over time, **What the team does** (work mix and top tools), **Rhythm** and **Models · effort · client**.
+3. **Person focus:** the avatar chips in the top bar (or a board row, map pin or flag) focus one person. The features, work mix, models and flags then describe only them, and the board dims everyone else. Click ✕ on the name chip to go back to everyone.
+4. **Features in use:** one row per feature (skills, MCP, subagents, web, edits, @-mentions, plugins), showing how many people use it and who. With a person focused, it shows how often that person used each one.
+5. **Map** (no header, edge to edge), framed around the team's cities. Pins never overlap; they are nudged apart with a thin line back to their city.
+6. **Team tokens** over time, **What the team does** (work mix and top tools), **Rhythm** and **Models · effort · client**.
 
 **Counting rules:**
 - Sessions count only if they contain a human prompt, so the desktop app's background helper sessions don't inflate them.
@@ -69,7 +60,7 @@ Built for a project manager reading how a team uses Claude Code: facts about beh
 
 **Learn mode** (the **?** button, top right): every tooltip gets a plain-language explanation underneath, and parts of the page that have no tooltip of their own get one. Card titles are underlined to show you can hover them. It covers:
 - **Tools:** built-in tools, e.g. *Bash: runs a command in the terminal*. MCP tool names are decoded, e.g. `Claude_Browser__browser_batch` → *the browser built into the Claude desktop app; runs several steps in one go*.
-- **Everything else:** every headline tile, board column, kind of work, flag, feature, model, effort level and client.
+- **Everything else:** every board column, kind of work, flag, feature, model, effort level and client.
 
 It is off by default and remembered per browser.
 
@@ -93,13 +84,11 @@ It is off by default and remembered per browser.
 ## Visual feedback
 Every new event is shown, not just heard:
 - **Flights:** a small token lifts off from the person who caused it (map pin, avatar or filter chip) and arcs to what it changes:
-  - ✎ prompt and ⚡ answer → the Time with agents tile
-  - ⚙ tool → that tool's bar in What the team does
+  - ✎ prompt, ⚡ answer and ⚙ tool → that person's row on the board
   - ✕ failure → that person's row on the board, with a soft red shake
   - ↻ recovery → health pill
-- **Landing:** the sound plays the moment a token lands. The target glows in the event's colour, a `+value` floats up, and the number rolls to its new value like a slot reel.
+- **Landing:** the sound plays the moment a token lands. The target glows in the event's colour, and a `+value` floats up.
 - **Team list:** active people glide to the top, with a breathing chip showing what they're doing right now.
-- **Milestones:** crossing a round number (for example every 1M tokens) gives a short shimmer, a few sparkles and the arpeggio sound.
 - **Limits:** at most 7 tokens per update, 230ms apart. With "reduce motion" switched on in the system settings, there are no flights or sparkles; the glows, floats and sounds remain.
 
 ## Sounds
