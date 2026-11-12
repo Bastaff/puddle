@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.3
+
+- **No more slowdowns from long conversations:** a conversation whose log grew past 512 MB made Puddle use over a
+  gigabyte of memory and try again on every change, and stopped your other conversations being read. Logs are now
+  read a piece at a time.
+- **Website:** a team page left open no longer shows up as a slow request, and the demo gives each teammate their own
+  hours.
+
 ## 0.0.2
 
 - **Signed and notarized:** Puddle now carries its Apple Developer ID and opens without a warning, and it installs

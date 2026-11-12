@@ -63,7 +63,7 @@ async function perfRoute(req, res, home) {
 
 const HELPER_VERSION = (() => { try { return fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'VERSION'), 'utf8').trim() || null; } catch { return null; } })() || `dev-${Date.now()}`;
 
-export function startPersonal({ home, port = 4601, log = () => {}, listen = true, share = null, shareNext = null, layout = null, site = null } = {}) {
+export function startPersonal({ home, port = 4601, log = () => {}, listen = true, share = null, shareNext = null, layout = null, site = null, onError = () => {} } = {}) {
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = openDb(path.join(home, 'personal.db'));
   for (const f of ['personal.db', 'personal.db-wal', 'personal.db-shm']) try { fs.chmodSync(path.join(home, f), 0o600); } catch {}
@@ -77,6 +77,7 @@ export function startPersonal({ home, port = 4601, log = () => {}, listen = true
   let soon = null, settle = null;
   const read = () => {
     const st = backfill.run();
+    if (st.error) onError('backfill');
     clearTimeout(settle); settle = st.settlesAt ? setTimeout(read, Math.max(1000, st.settlesAt - Date.now() + 500)) : null;
     settle?.unref?.();
   };

@@ -11,6 +11,9 @@ info="$(codesign -dv --verbose=2 "$APP" 2>&1)"
 printf '%s\n' "$info" | grep -q '^Authority=Developer ID Application:' || fail "not signed with a Developer ID (ad hoc?): build with APPLE_SIGNING_IDENTITY"
 printf '%s\n' "$info" | grep -q 'flags=.*runtime' || fail "no hardened runtime: notarization would refuse it"
 printf '%s\n' "$info" | grep '^Authority=Developer ID Application:' | sed 's/^/  /'
+for bin in "$APP"/Contents/MacOS/*; do
+  if LC_ALL=C grep -a -q -F "$HOME/" "$bin"; then fail "$(basename "$bin") holds your home folder's path: it wasn't stripped (docs/releasing.md: the build's -Wl,-S,-x)"; fi
+done
 
 say "2. Apple's notary service (a few minutes)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT

@@ -65,7 +65,7 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
   const dir = dataDir(home, env);
   const choicesFile = path.join(dir, 'companion.json');
   let shareAsk = 0;
-  const personal = startPersonal({ home: dir, port: port + 1, log, listen, share: (action, body) => cloud.share(action, body),
+  const personal = startPersonal({ home: dir, port: port + 1, log, listen, onError: (k) => errors.note(k), share: (action, body) => cloud.share(action, body),
     shareNext: () => { const on = Date.now() - shareAsk < 120_000; shareAsk = 0; return on; },
     layout: { get: () => cloud.layouts(), set: (b) => cloud.setLayout(b) },
     site: { update: () => updater.state, install: () => updater.install(), work: (from) => workFromScan(getScan(), from), plan: () => labelPlans(plan.latest(), getScan()),

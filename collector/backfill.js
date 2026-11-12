@@ -161,7 +161,8 @@ export function makeBackfill(db, { home, notify, log }) {
         const seen = fileRow.get(file);
         if (!full && seen && seen.size === st.size && seen.mtime_ms === st.mtimeMs) { if (st.mtimeMs < Date.now() - IDLE_MS) followed.logs.delete(file); continue; }
         files++;
-        const { s, text, bytes } = followed.follow(file, st, { again: full });
+        const { s, text, bytes, more } = followed.follow(file, st, { again: full });
+        if (more) settles = Math.min(settles, Date.now() + 1000);
         const todo = s.later;
         if (text) { const got = s.parser.feed(text); for (const k of Object.keys(todo)) for (const x of got[k]) todo[k].add(x); }
         bytesRead += bytes;
@@ -250,7 +251,7 @@ export function makeBackfill(db, { home, notify, log }) {
             if (!ex && Number(r.changes)) recovered.code_lines++;
           }
           s.later = later;
-          if (!Object.values(later).some((x) => x.size)) setFile.run(file, st.size, st.mtimeMs);
+          if (!more && !Object.values(later).some((x) => x.size)) setFile.run(file, st.size, st.mtimeMs);
           db.exec('COMMIT');
         } catch (e) { db.exec('ROLLBACK'); followed.logs.delete(file); throw e; }
       }
