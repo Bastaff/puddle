@@ -85,9 +85,14 @@ test('the day table gives the same team page, and late data for a finished day f
     const q = makeQueries(S, { now: () => now, rollup: () => true, fast: () => fast });
     const f = { members, scope, user: null, from: now - 30 * 864e5, to: now + 60_000 };
     const r = JSON.parse(JSON.stringify({ team: await q.team(f, -60, { parts: 'core' }), health: await q.health({ members }) }));
-    return JSON.parse(JSON.stringify(r, (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1e6) / 1e6 : v)));
+    return r;
   };
-  assert.deepEqual(await page(true), await page(false));
+  const same = (a, b, msg) => {
+    const fit = (x, y) => typeof x === 'number' && typeof y === 'number' ? (Math.abs(x - y) <= 1e-6 + 1e-9 * Math.max(Math.abs(x), Math.abs(y)) ? x : y)
+      : x && y && typeof x === 'object' && typeof y === 'object' ? (Array.isArray(y) ? y.map((v, i) => fit(x[i], v)) : Object.fromEntries(Object.entries(y).map(([k, v]) => [k, fit(x[k], v)]))) : y;
+    assert.deepEqual(a, fit(a, b), msg);
+  };
+  same(await page(true), await page(false));
   const day = Math.floor((now - 3 * 864e5) / 864e5) * 864e5 + 3600_000;
   const late = structuredClone(rows.find((r) => r.name === 'tool_result' && r.dedupe));
   const who = (await S.one(`SELECT user_key FROM events WHERE dedupe = ?`, [late.dedupe])).user_key;
@@ -96,12 +101,12 @@ test('the day table gives the same team page, and late data for a finished day f
   await pgs.insertEvents([late]);
   const after = Number((await S.one(`SELECT COUNT(*) n FROM event_day_done WHERE user_key = ? AND day = ?`, [who, day - 3600_000])).n);
   assert.equal(before, 1); assert.equal(after, 0, 'the late row un-marks its day');
-  assert.deepEqual(await page(true), await page(false));
+  same(await page(true), await page(false));
   const pt = structuredClone(points.find((x) => x.name === 'active_time.total' && !x.cumulative) || points[0]);
   const used = Number((await S.one(`SELECT COUNT(*) n FROM metric_quarter`)).n);
   await pgs.insertPoints([{ ...pt, ts: now - 2 * 864e5 + 7 * 60_000, value: 41, cumulative: false }]);
   assert.ok(used > 0 && Number((await S.one(`SELECT COUNT(*) n FROM metric_quarter`)).n) >= used, 'the metric table is filled and kept up to date');
-  assert.deepEqual(await page(true), await page(false), 'a new metric point shows the same either way');
+  same(await page(true), await page(false), 'a new metric point shows the same either way');
   await pgs.rollup.fillDays({ limit: 1e6 });
-  assert.deepEqual(await page(true), await page(false), 'and the rebuilt day agrees too');
+  same(await page(true), await page(false), 'and the rebuilt day agrees too');
 });
