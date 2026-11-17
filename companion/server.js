@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scan, claudePlans, claudeHistoryFile } from './scan.js';
+import { claudePlans, claudeHistoryFile } from './scan.js';
+import { scanThread } from './scan-thread.js';
 import { topConversations } from '../collector/queries.js';
 import { startPersonal } from './personal.js';
 import { makeCloud, serviceUrl } from './cloud.js';
@@ -72,11 +73,16 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
       mac: () => ({ connected: cloud.connected(), email: cloud.email(), website: Boolean(serviceUrl(env)), version: currentVersion(), accounts: (getScan().accounts || []).filter((a) => Object.keys(a.surfaces || {}).length)
         .map(({ tool, kind, org, plan }) => ({ tool, kind, org, plan })) }),
       projectOf: () => { const m = new Map((getScan().sessions || []).map((x) => [x.id, x.repo || x.folder || null])); return (sid) => m.get(sid) || null; }, nav: () => cloud.nav(), link: (next) => cloud.dashboardLink(next), signOut: async () => { await cloud.signOut(); fs.rmSync(choicesFile, { force: true }); } } });
-  let cached = null;
-  const getScan = (fresh) => {
-    if (fresh || !cached || Date.now() - cached.at > 30_000) { cached = { at: Date.now(), data: scan({ home, env, titles: titles.names() }) }; for (const r of cached.data.plans || []) plan.record(r); }
-    return cached.data;
-  };
+  let cached = null, scanning = null;
+  const EMPTY = { days: 90, scannedAt: 0, tools: [], plans: [], accounts: [], places: [], sessions: [], daily: [], totals: { sessions: 0, prompts: 0, minutes: 0, activeDays: 0 }, blindSpots: [] };
+  const scanner = scanThread({ home, env, log });
+  const refresh = () => (scanning ||= scanner.request(titles.names()).then((data) => {
+    scanning = null;
+    if (data) { cached = { at: Date.now(), data }; for (const r of data.plans || []) plan.record(r); }
+    return cached?.data || EMPTY;
+  }));
+  const getScan = () => { if (!cached || Date.now() - cached.at > 30_000) refresh(); return cached?.data || EMPTY; };
+  const scanNow = async (fresh) => (fresh || !cached ? refresh() : getScan());
   const errors = makeErrors();
   const titles = makeTitles({ dir });
   const cloud = makeCloud({ dir, env, log });
@@ -87,11 +93,11 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
   const timers = [];
   const keeper = makeKeeper({ home, env, credentials: () => cloud.credentials?.(), connect: (only) => cloud.connectAgent(only), log, onError: (k) => errors.note(k) });
   const cost = makeCost({ dir, reads: () => personal.backfill.status(), errors, timers: listen });
-  const report = () => setupReport({ scan: getScan(), lineSeen: titles.seen(), version: currentVersion(), built: currentBuilt(),
+  const report = (sc = getScan()) => setupReport({ scan: sc, lineSeen: titles.seen(), version: currentVersion(), built: currentBuilt(),
     statusline: env.PUDDLE_DEV ? null : statusLineIsPuddle(home, dir), errors: errors.list(), agents: env.PUDDLE_DEV ? null : keeper.state(), cost: cost.summary() });
   let tick = Date.now(), wokeAt = 0;
   const checkIn = async (again = false) => {
-    let body = null; try { body = report(); } catch (e) { errors.note('scan'); log(`report: ${e.message}`); }
+    let body = null; try { body = report(await scanNow()); } catch (e) { errors.note('scan'); log(`report: ${e.message}`); }
     const r = await cloud.alive(body).catch((e) => {
       log(`check-in failed: ${e.cause?.code || e.name}${wokeAt ? `, ${Math.round((Date.now() - wokeAt) / 1000)} s after waking` : ''}${again ? '' : ', trying again'}`);
       if (again) errors.note('check-in');
@@ -101,7 +107,7 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
     if (r?.status === 401 && cloud.connected()) { log('key no longer valid: signing out'); await cloud.signOut({ forget: false }); fs.rmSync(choicesFile, { force: true }); return; }
     if (r?.status === 200) await cloud.healKeys().catch((e) => { errors.note('keys'); log(`keys: ${e.message}`); });
   };
-  const sync = () => (closed ? null : Promise.all([checkIn(), cloud.syncContexts(getScan()).catch((e) => { errors.note('contexts'); log(`sync: ${e.message}`); })]));
+  const sync = async () => (closed ? null : Promise.all([checkIn(), cloud.syncContexts(await scanNow()).catch((e) => { errors.note('contexts'); log(`sync: ${e.message}`); })]));
   const onTick = () => {
     const t = Date.now(), late = t - tick - 120_000; tick = t;
     if (late < 60_000) return sync();
@@ -134,7 +140,7 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
     const url = new URL(req.url, 'http://localhost');
     try {
       if (url.pathname.startsWith('/__joule/')) { res.writeHead(204); return res.end(); }
-      if (url.pathname === '/api/scan') return json(res, 200, getScan(url.searchParams.has('fresh')));
+      if (url.pathname === '/api/scan') return json(res, 200, await scanNow(url.searchParams.has('fresh')));
       if (url.pathname === '/api/theme') return themeRoute(req, res, dir, json);
       if (url.pathname === '/agents.js') { res.writeHead(200, { 'content-type': TYPES['.js'], 'cache-control': 'no-store' }); return res.end(fs.readFileSync(path.join(PUBLIC, '..', '..', 'collector', 'public', 'agents.js'))); }
       if (url.pathname === '/theme.js') { res.writeHead(200, { 'content-type': TYPES['.js'], 'cache-control': 'no-store' }); return res.end(fs.readFileSync(path.join(PUBLIC, '..', '..', 'collector', 'public', 'theme.js'))); }
@@ -231,12 +237,12 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
       if (url.pathname === '/api/invite') {
         const real = await cloud.invite().catch(() => null);
         if (real?.team) {
-          const s = getScan();
+          const s = await scanNow();
           return json(res, 200, { real: true, code: real.code, team: real.team.name, from: real.owner || 'Your team',
             accounts: s.accounts.filter((a) => a.kind === 'work').map((a) => a.key), places: [] });
         }
         if (!url.searchParams.has('sim')) return json(res, 200, null);
-        const s = getScan();
+        const s = await scanNow();
         const work = s.accounts.filter((a) => a.kind === 'work');
         const org = work.find((a) => a.org)?.org;
         return json(res, 200, work.length || s.places.length ? {
@@ -261,7 +267,7 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
     server.on('error', (e) => { if (e.code === 'EADDRINUSE') { log(`Port ${port} is busy — the companion preview is probably already running at http://127.0.0.1:${port}`); process.exit(1); } throw e; });
     server.listen(port, '127.0.0.1', () => log(`Puddle companion preview: http://127.0.0.1:${port}`));
   }
-  return { server, personal, cloud, checkIn, close: () => { closed = true; clearInterval(syncTimer); for (const t of timers) clearTimeout(t); mirror?.stop(); cost.close(); plan.close(); planWatch?.close(); titles.close(); server.close(); personal.close(); } };
+  return { server, personal, cloud, checkIn, close: () => { closed = true; scanner.close(); clearInterval(syncTimer); for (const t of timers) clearTimeout(t); mirror?.stop(); cost.close(); plan.close(); planWatch?.close(); titles.close(); server.close(); personal.close(); } };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

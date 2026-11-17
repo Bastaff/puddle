@@ -1,16 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toOtlp, SENT } from '../companion/mirror.js';
+import { toOtlp } from '../companion/mirror.js';
+import { fingerprint } from '../companion/cloud.js';
 
-test('a stored step goes up with its counts and allow-listed fields only, the account as a fingerprint', () => {
-  const row = { ts: 1793700000000, name: 'tool_result', session_id: 's1', dedupe: 'tr:tu1', tool_name: 'Bash', success: 1, duration_ms: 1200,
-    attrs_json: JSON.stringify({ 'user.email': 'me@acme.io', 'user.account_uuid': 'acct-1', 'organization.id': 'org-1', error: 'cat /Users/me/secret.txt: denied',
-      tool_parameters: '{"command":"cat secret.txt"}', prompt: 'fix the login bug', 'user.country': 'BG', 'event.sequence': 7, someone_new: 'x' }) };
-  const [rec] = toOtlp([row], 'Europe/Sofia', () => 'org-1').resourceLogs[0].scopeLogs[0].logRecords;
+test('mirrored history sends only allow-listed fields, and the account as its fingerprint', () => {
+  const stored = { 'user.email': 'dev@acme.io', 'user.account_uuid': 'u-1', 'organization.id': 'org-acme', 'user.display_name': 'Dev',
+    tool_input: '{"command":"cat .env"}', error: 'ENOENT /Users/dev/secret.txt', some_future_field: 'x',
+    recovered_from: 'session log', 'app.entrypoint': 'cli', 'skill.name': 'review', status_code: 529 };
+  const rows = [{ dedupe: 'tr:t-1', ts: 1, name: 'tool_result', session_id: 'work-1', tool_name: 'Bash', success: 1, duration_ms: 40, attrs_json: JSON.stringify(stored) }];
+  const rec = toOtlp(rows, 'Europe/Berlin', () => 'org-acme').resourceLogs[0].scopeLogs[0].logRecords[0];
   const a = Object.fromEntries(rec.attributes.map((x) => [x.key, x.value.stringValue]));
-  const all = JSON.stringify(rec);
-  for (const gone of ['me@acme.io', 'acct-1', 'secret', 'fix the login', 'someone_new', '"org-1"']) assert.ok(!all.includes(gone), `${gone} stays on the Mac`);
-  assert.equal(a.tool_name, 'Bash'); assert.equal(a.success, 'true'); assert.equal(a['user.country'], 'BG'); assert.equal(a['tool_use_id'], 'tu1');
-  assert.match(a['context.org'], /^[0-9a-f]{16}$/, 'the account only as a fingerprint');
-  for (const k of Object.keys(a)) assert.ok(SENT.has(k) || ['event.name', 'session.id', 'tool_use_id', 'context.org', 'tool_name', 'duration_ms', 'success'].includes(k), `${k} is listed`);
+  assert.deepEqual(Object.keys(a).sort(), ['app.entrypoint', 'context.org', 'duration_ms', 'event.name', 'recovered_from', 'session.id', 'skill.name',
+    'status_code', 'success', 'tool_name', 'tool_use_id'].sort());
+  assert.equal(a['context.org'], fingerprint('org-acme'));
+  assert.ok(!JSON.stringify(rec).includes('org-acme') && !JSON.stringify(rec).includes('acme.io'), 'neither the account id nor the email leaves');
 });

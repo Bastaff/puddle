@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from '../collector/db.js';
 import { makeQueries, parseFilters, planNow } from '../collector/queries.js';
 import { makeBackfill, LOG_FOLDERS } from '../collector/backfill.js';
+import { backfillThread } from '../collector/backfill-thread.js';
 import { rhythm, activeSegments } from '../collector/forecast.js';
 import { themeRoute, readTheme } from './theme.js';
 
@@ -72,15 +73,16 @@ export function startPersonal({ home, port = 4601, log = () => {}, listen = true
   let pending = null;
   let version = 0;
   const notify = () => { version++; if (pending) return; pending = setTimeout(() => { pending = null; for (const r of clients) r.write(`event: update\ndata: ${Date.now()}\n\n`); }, 500); };
-  const backfill = makeBackfill(store.db, { home, notify, log });
-  backfill.startup();
+  const local = makeBackfill(store.db, { home, notify, log });
+  local.startup();
   let soon = null, settle = null;
-  const read = () => {
-    const st = backfill.run();
+  const thread = backfillThread({ file: path.join(home, 'personal.db'), home, notify, log, onStatus: (st) => {
     if (st.error) onError('backfill');
     clearTimeout(settle); settle = st.settlesAt ? setTimeout(read, Math.max(1000, st.settlesAt - Date.now() + 500)) : null;
     settle?.unref?.();
-  };
+  } });
+  const backfill = { ...local, run: (o) => thread.run(o), status: () => thread.status() };
+  const read = () => { thread.run(); };
   const first = setTimeout(read, 50);
   const changed = () => { soon ??= setTimeout(() => { soon = null; read(); }, 2000); };
   const watchers = new Map();
@@ -269,5 +271,5 @@ fetch('/api/app-signout', { method: 'POST', headers: { 'x-puddle': '1' } }).then
     server.on('error', (e) => log(e.code === 'EADDRINUSE' ? `Port ${port} is busy: the personal dashboard is probably already running` : e.message));
     server.listen(port, '127.0.0.1', () => log(`Puddle · Me: http://127.0.0.1:${port}`));
   }
-  return { server, store, backfill, highlightData, todayData, rhythmData, close() { clearTimeout(first); clearTimeout(soon); clearTimeout(settle); clearInterval(every); for (const w of watchers.values()) w.close(); clearInterval(ping); backfill.stop(); server.close(); try { store.close(); } catch {} } };
+  return { server, store, backfill, highlightData, todayData, rhythmData, close() { clearTimeout(first); clearTimeout(soon); clearTimeout(settle); clearInterval(every); for (const w of watchers.values()) w.close(); clearInterval(ping); local.stop(); thread.close(); server.close(); try { store.close(); } catch {} } };
 }

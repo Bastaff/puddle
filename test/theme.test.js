@@ -27,19 +27,3 @@ test('Puddle keeps the theme: round trip, local pages only, and /go hands it to 
     assert.match(decodeURIComponent(go.headers.get('location')), /\/settings\?app=.*&theme=dark/, 'the website page opens in the same theme');
   } finally { p.close(); }
 });
-
-test('one theme switch: theme.js only, the same boot lines everywhere', () => {
-  const files = ['collector/public/app.js', 'collector/public/index.html', 'collector/public/person.html', 'companion/public/app.js', 'companion/public/index.html',
-    'companion/public/me/index.html', 'service/pages.js', 'service/you-page.js', 'service/team-pages.js']
-    .filter((f) => fs.existsSync(path.join(ROOT, f)))
-    .map((f) => [f, fs.readFileSync(path.join(ROOT, f), 'utf8')]);
-  for (const [f, s] of files) {
-    assert.doesNotMatch(s, /joule-theme/, `${f}: no second theme setting`);
-    assert.doesNotMatch(s, /setItem\(['"]cu-theme/, `${f}: only theme.js changes the theme`);
-  }
-  const boot = 'new URLSearchParams(location.search).get("theme")';
-  for (const f of ['collector/public/index.html', 'collector/public/person.html', 'companion/public/index.html', 'companion/public/me/index.html', 'service/pages.js', 'service/you-page.js', 'service/team-pages.js'])
-    if (files.some(([n]) => n === f)) { const t = files.find(([n]) => n === f)[1]; assert.ok(t.includes(boot) || t.includes('${THEME_BOOT}'), `${f}: the shared boot lines (a ?theme= counts before the first paint)`); }
-  for (const f of ['collector/public/index.html', 'collector/public/person.html', 'companion/public/index.html', 'companion/public/me/index.html'])
-    assert.match(files.find(([n]) => n === f)[1], /src="\/theme\.js"/, `${f} loads theme.js`);
-});

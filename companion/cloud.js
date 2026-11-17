@@ -60,21 +60,37 @@ export function makeCloud({ dir, env = process.env, fetchImpl = fetch, log = () 
   };
 
   let syncing = false;
+  const CONTEXT_BATCH = 100, CONTEXT_GAP = 500;
   async function syncOnce(scanData, days) {
     const sentFile = path.join(dir, 'synced.json');
     const signIn = this.signInKey();
     let sent = {}; try { const st = JSON.parse(fs.readFileSync(sentFile, 'utf8')); if (st.signIn === signIn) sent = st.sent || {}; } catch {}
     const since = Date.now() - days * 86400_000;
     const accounts = Object.fromEntries((scanData.accounts || []).map((a) => [a.key, a]));
-    let n = 0;
+    let n = 0, one = false;
+    const todo = [];
     for (const s of scanData.sessions || []) {
       const sig = `${s.repo}|${s.folder}|${s.title || ''}`;
       if (!s.id || s.end < since || sent[s.id] === sig) continue;
       const a = accounts[s.account], id = s.account?.split(':').slice(1).join(':');
       const account = a && id && !['none', 'api-key', 'cloud'].includes(id)
         ? { org_hash: fingerprint(id), type: String(a.plan || a.kind || ''), name: a.kind === 'work' ? a.org || '' : '' } : undefined;
-      const r = await call('POST', '/api/session-context', { session_id: s.id, agent: s.tool, repo: s.repo ? `https://${s.repo}` : '', folder: s.folder || '', title: s.title || '', source: 'app', account }).catch(() => null);
-      if (r?.status === 200) { sent[s.id] = sig; n++; fs.writeFileSync(sentFile, JSON.stringify({ signIn, sent }), { mode: 0o600 }); }
+      todo.push({ sig, body: { session_id: s.id, agent: s.tool, repo: s.repo ? `https://${s.repo}` : '', folder: s.folder || '', title: s.title || '', source: 'app', account } });
+    }
+    const save = () => fs.writeFileSync(sentFile, JSON.stringify({ signIn, sent }), { mode: 0o600 });
+    for (let i = 0; i < todo.length;) {
+      if (one) {
+        const t = todo[i++];
+        const r = await call('POST', '/api/session-context', t.body).catch(() => null);
+        if (r?.status === 200) { sent[t.body.session_id] = t.sig; n++; save(); }
+        continue;
+      }
+      const chunk = todo.slice(i, i + CONTEXT_BATCH);
+      const r = await call('POST', '/api/session-context', { sessions: chunk.map((t) => t.body) }).catch(() => null);
+      if (r?.status === 200 && r.data?.saved != null) { for (const t of chunk) sent[t.body.session_id] = t.sig; n += chunk.length; save(); i += chunk.length; }
+      else if (r?.status === 200 || r?.status === 400) one = true;
+      else break;
+      if (i < todo.length) await new Promise((ok) => setTimeout(ok, CONTEXT_GAP));
     }
     return { sent: n };
   }

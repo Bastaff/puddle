@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.5
+
+- **Opening Puddle after days away is quick:** catching up on the days you missed happens in the background, so
+  the app and Me answer at once instead of freezing for seconds.
+- **Catching up sends far less:** session details go up in batches, a hundred at a time, instead of one by one.
+- **Team pages open at once** with the last numbers, then freshen in place.
+
 ## 0.0.4
 
 - **Pages load faster and never jump:** every page draws its cards right where they end up, at their final size, and

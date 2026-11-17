@@ -864,8 +864,8 @@ function fetchView(r, { prefetch = false } = {}) {
   let signal;
   if (!prefetch) { if (viewCtl && viewCtl.range !== r) viewCtl.abort(); viewCtl = new AbortController(); viewCtl.range = r; signal = viewCtl.signal; }
   const opt = { signal, ...(prefetch ? { headers: { 'x-puddle-prefetch': '1' } } : {}) };
-  const get = (u) => fetch(api(u), opt).then((x) => (x.ok ? x.json() : Promise.reject(new Error(`view ${x.status}`))));
-  const b = get('/api/board?' + bq), t = get('/api/team?' + tq), both = Object.assign(Promise.all([b, t]), { team: t, boardIn: false });
+  const get = (u) => fetch(api(u), opt).then((x) => { if (x.headers.get('x-puddle-stale')) both.stale = true; return x.ok ? x.json() : Promise.reject(new Error(`view ${x.status}`)); });
+  const b = get('/api/board?' + bq), t = get('/api/team?' + tq), both = Object.assign(Promise.all([b, t]), { team: t, boardIn: false, stale: false });
   b.then(() => { both.boardIn = true; }, () => {});
   return both;
 }
@@ -875,7 +875,7 @@ function prefetch(r) {
   inflight.set(r, { at: Date.now(), promise });
   promise.then(([board, team]) => remember(viewKey(r), { board, team })).catch(() => {});
 }
-let shownKey = null;
+let shownKey = null, staleTries = 0, staleTimer = null;
 const viewKey = (r = state.range) => `puddle-view:${state.demo ? 'demo' : TEAM || 'me'}|${r}|${skipped()}`;
 function remember(key, v) {
   try {
@@ -924,6 +924,7 @@ async function load() {
       globalThis.PuddlePerf?.drawn('team'); globalThis.PuddleHeal?.drawn();
       Fx.run(flights);
       cards.refresh();
+      if (view.stale && staleTries < 4) { staleTries++; clearTimeout(staleTimer); staleTimer = setTimeout(() => load(), 2500 * staleTries); } else if (!view.stale) staleTries = 0;
     } catch (e) {
       if (e?.name === 'AbortError') return;
       console.error(e);

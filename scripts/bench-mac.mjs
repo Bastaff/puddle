@@ -2,6 +2,7 @@
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process'; import { fileURLToPath } from 'node:url';
 import { freePort } from '../test/port.js';
+import { RESULTS } from './bench-dir.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -247,7 +248,7 @@ try {
   console.log(`your work alone: ${r1(baseline)} ms per piece`);
   if (which !== 'real') await synthetic();
   if (['all', 'real'].includes(which)) await real();
-  const out = path.join(ROOT, 'bench', `mac-${LABEL}.json`); fs.mkdirSync(path.dirname(out), { recursive: true });
+  const out = path.join(RESULTS, `mac-${LABEL}.json`); fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(results, null, 2));
   console.log(`\nsaved ${path.relative(ROOT, out)}`);
 } finally { cleanup(); }

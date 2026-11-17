@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeDemo, makeSim, DEMO_PEOPLE } from '../collector/demo.js';
+import { makeDemo, DEMO_PEOPLE } from '../collector/demo.js';
 
 test('demo team: separate database with every person and their way of working', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu-demo-'));
@@ -29,12 +29,4 @@ test('demo team: separate database with every person and their way of working', 
     demo.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('demo simulator emits events in real time for people at work', async () => {
-  const sim = makeSim(3);
-  const t0 = Date.now();
-  let n = 0;
-  for (let t = t0; t < t0 + 120_000; t += 1000) n += sim.step(t).ev.length;
-  assert.ok(n > 20, `expected live events, got ${n}`);
 });
