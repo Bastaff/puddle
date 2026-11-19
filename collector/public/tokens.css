@@ -6,7 +6,7 @@
   color-scheme: light;
   --page: #f7f2e9; --surface: #fffdf8; --raised: #ffffff; --cal0: #e8dfcc;
   --ink: #1f1b16; --ink-2: #4f4a42; --muted: #8a8378;
-  --grid: #ece6da; --axis: #cfc7b8; --border: #1f1b16; --wash: rgba(31, 27, 22, 0.055);
+  --grid: #ece6da; --axis: #cfc7b8; --ghost: color-mix(in srgb, var(--axis) 50%, transparent); --border: #1f1b16; --wash: rgba(31, 27, 22, 0.055);
   --land: #ddd3bf; --land-on: #b7d3f6; --ocean: #efeae1;
   --tint-hero: #efe8fb; --tint-today: #fff3d1; --tint-team: #e6f4ec;
   --gold: #f5b301; --gold-2: #d99a00;

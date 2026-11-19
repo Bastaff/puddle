@@ -10,7 +10,7 @@ dist/
 *.db-shm
 *.db-wal
 
-# secrets and per-machine config (real values live in GCP Secret Manager or ~/.joule)
+# secrets and per-machine config (real values live in GCP Secret Manager or ~/.puddle)
 .env
 .env.*
 !.env.example

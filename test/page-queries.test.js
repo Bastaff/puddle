@@ -93,9 +93,11 @@ test('the day table gives the same team page, and late data for a finished day f
     assert.deepEqual(a, fit(a, b), msg);
   };
   same(await page(true), await page(false));
-  const day = Math.floor((now - 3 * 864e5) / 864e5) * 864e5 + 3600_000;
   const late = structuredClone(rows.find((r) => r.name === 'tool_result' && r.dedupe));
   const who = (await S.one(`SELECT user_key FROM events WHERE dedupe = ?`, [late.dedupe])).user_key;
+  const done = (await S.one(`SELECT MAX(day) d FROM event_day_done WHERE user_key = ? AND day <= ?`, [who, Math.floor(now / 864e5) * 864e5 - 3 * 864e5])).d;
+  assert.ok(done != null, 'the person has a finished day at least three days back');
+  const day = Number(done) + 3600_000;
   const before = Number((await S.one(`SELECT COUNT(*) n FROM event_day_done WHERE user_key = ? AND day = ?`, [who, day - 3600_000])).n);
   Object.assign(late, { ts: day, dedupe: 'late-' + day, tool_name: 'LateTool' });
   await pgs.insertEvents([late]);

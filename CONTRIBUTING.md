@@ -33,8 +33,8 @@ npm run dev:app     # builds and installs Puddle Dev ("DEV" in the menu bar) nex
 Puddle Dev keeps its own data (`~/.puddle-dev`) and never touches your agents' settings, so you can try anything.
 Every change comes with a test that fails without it.
 
-Write code like the code around it: the same naming, the same density of comments, comments that say why rather than
-what.
+Write code like the code around it: the same naming and the same shape. Puddle's code has no comments; names and tests
+say why.
 
 ## Pull requests
 

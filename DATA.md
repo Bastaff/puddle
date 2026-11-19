@@ -19,14 +19,16 @@ this page says, that's a bug: please [report it](SECURITY.md).
 - **Timings, counts and names**, in a database on your Mac (`~/.puddle/personal.db`): when you worked, which model, how many tokens, what it cost, which tool ran and whether it worked, how long a prompt was.
 - **Text is dropped as it's read** (`collector/otlp.js` `eventRow`, `collector/backfill.js`).
 - **For tool runs:** what was run or opened is never stored, only the tool's name (`TOOL_DETAIL_KEYS`).
+- **Me's last answers**, so Me opens at once (`~/.puddle/answers/`): the same numbers Me shows, plus your project folders' names for the Shipped card. Only on this Mac, readable only by you, replaced as new numbers come in.
+- **Two labels that stay on this Mac:** for a command an agent ran, only its kind (test, build, commit, push, deploy or other); for a file it edited, only its type (`js`, `swift`, … or other). The command, the path and the file name are never stored (`collector/kinds.js`). These labels are never uploaded, even after you sign in (they are not in `SENT`).
 
-**The Me page** is served by Puddle's helper on `127.0.0.1` and loads nothing from the internet. Its map and charts are vendored (`collector/public/vendor/`).
+**The Me page** is served by Puddle's helper on `127.0.0.1` and loads nothing from the internet. Its charts and font are vendored (`collector/public/vendor/`).
 
 **The one request** Puddle makes before you sign in: every 15 minutes it asks the update server whether a newer version exists (`companion/update.js`). That request carries nothing about you.
 
 ## When you sign in
 
-Signing in (email code) is optional. You need it to share a live page, join a team or appear on a leaderboard. After that, Puddle sends the following to the Puddle website (`companion/cloud.js`, `companion/mirror.js`, `plugin/bin/puddle`).
+Signing in (email code) is optional. You need it to share a live page or join a team. After that, Puddle sends the following to the Puddle website (`companion/cloud.js`, `companion/mirror.js`, `plugin/bin/puddle`).
 
 | What | When | Fields |
 |---|---|---|
@@ -34,7 +36,8 @@ Signing in (email code) is optional. You need it to share a live page, join a te
 | **History from before you connected**, so your page isn't empty | Every 30 s, the last 90 days, until sent | Only the allow-listed fields in `SENT` (`companion/mirror.js`): the event's name, time, session id, the ids that prevent double counting, model, tokens, cost, duration, success, tool name, prompt length, your time zone and country (the Mac's region), and the account as a fingerprint. Anything else stays on the Mac, and a test checks it (`test/mirror-fields.test.js`). |
 | **Which project a conversation was in** | Every 2 min, for new or renamed conversations | Session id; the repo's address with any credentials removed (e.g. `github.com/acme/app`); the folder's name; the conversation's title as Claude Code shows it (its own generated title, or the name you gave it, never a prompt); the account fingerprint and plan, and the company's name for Team/Enterprise plans only. |
 | **Plan limits** | When they change | How much of your 5-hour, weekly and monthly limits is used, and when they reset; the account as a fingerprint. |
-| **A health check-in** | Every 2 min | Puddle's version; how many conversations each app (terminal, desktop, IDE) had this week and how many had a title; error counts by kind; whether each agent is connected; what Puddle itself cost the Mac in the last day (its CPU %, memory, longest freeze, how much session log it read and how long that took, the total size of those logs, status line runs). Never which conversations they were. |
+| **How you arranged your pages** | When you change it | Which cards are shown or hidden, their order and size, and on Me where each card sits (column, row, width, height). |
+| **A health check-in** | Every 2 min | Puddle's version; how many conversations each app (terminal, desktop, IDE) had this week and how many had a title; error counts by kind; whether each agent is connected; what Puddle itself cost the Mac in the last day (its CPU %, memory, longest freeze, how many times its helper stopped on an error and the error's code (such as `ERR_SQLITE_ERROR`), how much session log it read and how long that took, the total size of those logs, status line runs). Never which conversations they were. |
 | **This Mac's name** | Once, when signing in | Your macOS user name (or the computer's name, from the `puddle` command), so you can tell your devices apart in Settings. Only you see it. |
 
 ### What signing in changes on your Mac
@@ -58,9 +61,11 @@ an account none of this happens.
 
 **What you share is your choice:**
 - **A team** sees only the accounts and projects you chose to share when you joined.
-- **A public page** shows only the cards of Me you switch on (Share live, or Settings → Sharing). Three can show names
-  from your work, said next to their switch: Recent conversations (their titles and projects), Code changes (project
-  names), and What the agent worked on or Needs a look (tool names). Nothing else you or the agent wrote is ever on it.
+- **A public page** shows records from your last 30 days, only for the parts you switch on (Share live, or Settings →
+  Sharing): agent hours and agents at once, your streak, lines added in total, your biggest prompt, how much ran
+  without asking, and the kinds of work (web apps, iOS apps or code). It shows no project, tool or file names, and
+  nothing you or the agent wrote. While it's open it only learns that something changed, then asks for the records
+  again.
   Under your name it shows a short line you write yourself (80 characters at most), or, if you leave it empty, one
   Puddle writes from those cards (like "Daytime builder · 24 days in a row").
 

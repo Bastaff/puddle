@@ -18,7 +18,7 @@
     const all = series.flatMap((s) => s.points.map((p) => p[1])).concat(0), lo = Math.min(...all), hi = Math.max(...all), span = hi - lo || 1;
     const W = 600, H = 170, P = 6, x = (t) => P + ((t - from) / (now - from)) * (W - 2 * P), y = (v) => H - P - ((v - lo) / span) * (H - 2 * P);
     const path = (pts) => pts.map(([t, v], i) => `${i ? 'L' : 'M'}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join('');
-    const startName = new Date(from).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const startName = now - from <= 26 * 36e5 ? new Date(from).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date(from).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
     el.innerHTML = `<div class="cl">
       <div class="cl-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Net lines per project over the range">
         ${mids.map((t) => `<line x1="${x(t).toFixed(1)}" x2="${x(t).toFixed(1)}" y1="0" y2="${H}" class="cl-day"/>`).join('')}

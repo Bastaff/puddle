@@ -23,8 +23,6 @@ export const KIND = {
 };
 
 const pct = (x) => `${Math.round(x * 100)}%`;
-const hrs = (min) => (min >= 60 ? `${(min / 60).toFixed(min >= 600 ? 0 : 1).replace(/\.0$/, '')} h` : `${Math.round(min)} min`);
-const shareOf = (mix, k) => { const tot = Object.values(mix || {}).reduce((a, b) => a + b, 0); return tot ? (mix[k] || 0) / tot : 0; };
 const topKind = (mix) => {
   const tot = Object.values(mix || {}).reduce((a, b) => a + b, 0);
   if (!tot) return null;
@@ -36,7 +34,6 @@ export const firstName = (p) => String(p.name || p.email?.split('@')[0] || 'Some
 const FLAG_WORDS = { quiet: 'stopped using it', stuck: 'stuck on a tool', broken: 'a tool keeps failing', failures: 'many failed steps', ratelimit: 'rate-limited',
   auth: 'sign-in errors', limit: 'at a plan limit', hook: 'a hook keeps failing', rejects: 'often says no to the agent', context: 'conversations run out of room',
   heavy: 'much heavier use than usual', version: 'old Claude Code', friction: 'approves step by step' };
-export const listNames = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
 
 const outsideWhen = (h) => {
   const parts = [['evening', h.evening], ['weekend', h.weekend], ['late-night', h.night]].sort((a, b) => b[1] - a[1]);
@@ -69,50 +66,6 @@ export function profile(p, ctx = {}) {
   if (!enough && !flag) facts.push({ key: 'light', text: p.prompts ? 'light use this period' : 'no use this period', evidence: `${p.prompts} prompt${p.prompts === 1 ? '' : 's'}` });
   const common = ctx.common || new Set();
   return { facts, line: facts.filter((f) => !common.has(f.key)).map((f) => f.text).join(' · ') };
-}
-
-export function teamSummary(people, { prevMinutes = null } = {}) {
-  const out = [];
-  const active = people.filter((p) => p.prompts > 0);
-  const n = people.length;
-  if (!n) return out;
-  const stopped = people.filter((p) => (p.flags || []).some((f) => f.kind === 'quiet' && !f.acknowledged));
-  out.push({ key: 'adoption', text: `${active.length} of ${n} ${n === 1 ? 'person' : 'people'} used agents in this period${stopped.length ? `; ${listNames(stopped.map(firstName))} stopped` : ''}.`,
-    evidence: active.map(firstName).join(', ') || 'nobody yet' });
-  if (!active.length) return out;
-  const minutes = people.reduce((a, p) => a + (p.activeMinutes || 0), 0);
-  if (minutes >= 1) {
-    const change = prevMinutes ? (minutes - prevMinutes) / prevMinutes : null;
-    out.push({ key: 'time', text: `${hrs(minutes)} of active work with agents${change == null ? '' : Math.abs(change) < 0.1 ? ', about the same as before' : `, ${change > 0 ? 'up' : 'down'} from ${hrs(prevMinutes)}`}.`,
-      evidence: 'Active time counts the stretches between events less than 5 minutes apart; parallel conversations count once.' });
-  }
-  const mix = {}; for (const p of people) for (const [k, v] of Object.entries(p.mix || {})) mix[k] = (mix[k] || 0) + v;
-  const kinds = Object.entries(mix).filter(([k, v]) => KIND[k] && v).sort((a, b) => b[1] - a[1]);
-  if (kinds.length) {
-    const tot = Object.values(mix).reduce((a, b) => a + b, 0);
-    const [k1, v1] = kinds[0], second = kinds[1];
-    const edits = shareOf(mix, 'edit');
-    out.push({ key: 'work', text: `Mostly ${KIND[k1].what} (${pct(v1 / tot)})${second && second[1] / tot >= 0.15 ? ` and ${KIND[second[0]].what} (${pct(second[1] / tot)})` : ''}${k1 !== 'edit' && edits < T.fewEdits ? `; little code editing (${pct(edits)})` : ''}.`,
-      evidence: kinds.map(([k, v]) => `${KIND[k].what} ${pct(v / tot)}`).join(' · ') });
-  }
-  const prompts = people.reduce((a, p) => a + (p.runs?.prompts || 0), 0), long = people.reduce((a, p) => a + (p.runs?.long || 0), 0);
-  if (prompts >= T.minPrompts) {
-    const share = long / prompts;
-    out.push({ key: 'delegation', text: share >= 0.05 ? `About 1 in ${Math.max(2, Math.round(1 / share))} prompts is a task handed over: ${T.longRun}+ steps without the person stepping in.` : `Agents mostly get short tasks: few prompts run ${T.longRun}+ steps on their own.`,
-      evidence: `${long} of ${prompts} prompts ran ${T.longRun}+ tool steps` });
-  }
-  const trusting = active.filter((p) => p.decisions >= 50 && p.autoApproved >= T.autoApproved);
-  if (active.length >= 3 && trusting.length > active.length / 2) out.push({ key: 'trust', text: `${trusting.length === active.length ? 'Everyone' : 'Most people'} let the agent act without stepping in (${T.autoApproved * 100}%+ of actions).`,
-    evidence: trusting.map((p) => `${firstName(p)} ${Math.floor(p.autoApproved * 100)}%`).join(' · ') });
-  const smooth = people.reduce((a, p) => a + (p.runs?.smooth || 0), 0);
-  const needs = people.filter((p) => (p.flags || []).some((f) => f.level === 'warn' && !f.acknowledged && f.kind !== 'quiet'));
-  if (prompts >= T.minPrompts) out.push({ key: 'smooth', text: `${pct(smooth / prompts)} of prompts ran without a failed step${needs.length ? `; ${listNames(needs.map(firstName))} ${needs.length === 1 ? 'has' : 'have'} something to look at below` : ''}.`,
-    evidence: `${smooth} of ${prompts} prompts had no failed tool call` });
-  const limited = people.filter((p) => p.week_pct >= T.nearLimit || p.five_pct >= T.nearLimit);
-  if (limited.length) out.push({ key: 'limits', text: `${listNames(limited.map(firstName))} ${limited.length === 1 ? 'is' : 'are'} close to a plan limit.`, evidence: limited.map((p) => `${firstName(p)}: 5-hour ${Math.round(p.five_pct ?? 0)}%, week ${Math.round(p.week_pct ?? 0)}%`).join(' · ') });
-  const total = people.reduce((a, p) => a + (p.hours?.total || 0), 0), outside = people.reduce((a, p) => a + (p.hours?.outside || 0), 0);
-  if (total >= 30 && outside / total >= 0.25) out.push({ key: 'hours', text: `${pct(outside / total)} of agent time is in the evening, at night or at the weekend.`, evidence: 'Outside 08–19 on weekdays, in each person\'s own time zone.' });
-  return out;
 }
 
 export function commonFacts(people) {

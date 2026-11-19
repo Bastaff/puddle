@@ -35,7 +35,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: companion-app
-      # the Node.js the app carries, checked against nodejs.org's checksums
       - run: node scripts/fetch-node.mjs
       - run: cargo check --locked
         working-directory: companion-app

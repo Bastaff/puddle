@@ -27,8 +27,8 @@
   globalThis.PUDDLE_GEAR = I.gear;
 
   const has = { share: page === 'me', demo: page === 'team', arrange: dash, learn: dash, sound: page === 'team', range: dash };
-  const rangeNow = (() => { try { const r = page === 'team' ? JSON.parse(store.get('cu2') || '{}').range || '7d' : store.get('pv-range') || '7d'; return r === 'today' ? '1d' : r; } catch { return '7d'; } })();
-  const ranges = [['1d', '1D', 'Last 24 hours'], ['7d', '7D', 'Last 7 days'], ['30d', '30D', 'Last 30 days'], ['90d', '90D', 'Last 90 days']];
+  const rangeNow = (() => { try { const r = page === 'team' ? JSON.parse(store.get('cu2') || '{}').range || '7d' : (sessionStorage.getItem('pv-range') || '7d'); return r === 'today' ? '1d' : page !== 'team' && r === '1d' ? '7d' : r; } catch { return '7d'; } })();
+  const ranges = [['1d', '1D', 'Last 24 hours'], ['7d', '7D', 'Last 7 days'], ['30d', '30D', 'Last 30 days'], ['90d', '90D', 'Last 90 days']].filter((r) => page === 'team' || r[0] !== '1d');
   const CARET = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 4.6 6 7.6l3-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const keep = [...bar.children];
   const settingsHref = helper ? site('/settings') : '/settings';
@@ -205,7 +205,7 @@ ${has.sound ? `<button class="icon-btn sound-btn" id="sound-btn" type="button" d
   if (typeof ResizeObserver === 'function') { let w = 0; new ResizeObserver(([e]) => { const nw = Math.round(e.contentRect.width); if (nw !== w) { w = nw; if (openPop) closePop(); fit(); } }).observe(bar); }
   document.fonts?.ready.then(fit);
 
-  const st = { stream: null, fetched: 'ok', check: null, since: Date.now() };
+  const st = { stream: null, fetched: 'ok', check: null, sync: null, since: Date.now() };
   const statusEl = bar.querySelector('#status');
   const hhmm = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   function paintStatus() {
@@ -216,6 +216,10 @@ ${has.sound ? `<button class="icon-btn sound-btn" id="sound-btn" type="button" d
       title = local ? 'Your own numbers still update live from this Mac. Teams and Settings come back when you’re online.'
         : `Showing what was here at ${hhmm(st.since)}. Puddle keeps counting on your Mac and sends it when you’re back.`;
     } else if (st.fetched === 'busy') { level = 'warn'; text = 'Busy'; title = `Puddle is busy for a moment: showing what was here at ${hhmm(st.since)}. It catches up by itself.`; }
+    else if (local && (st.sync || st.fetched === 'fail' || st.stream === false)) {
+      if (!st.sync && performance.now() < 3000) setTimeout(paintStatus, 3000 - performance.now());
+      else { level = 'info'; text = 'Updating…'; title = st.sync?.at ? `Showing what was here at ${hhmm(st.sync.at)}. The latest numbers are on the way.` : st.sync ? 'Getting your numbers from this Mac.' : 'Puddle on this Mac is busy for a moment. The numbers update by themselves.'; }
+    }
     else if (st.fetched === 'fail') { level = 'warn'; text = 'Reconnecting…'; title = `Can’t reach Puddle right now: showing what was here at ${hhmm(st.since)}. It tries again by itself.`; }
     else if (st.stream === false && performance.now() < 3000) { setTimeout(paintStatus, 3000 - performance.now()); }
     else if (st.stream === false) { level = 'warn'; text = 'Connecting…'; title = 'The live connection is reopening. The numbers are current as of the last update.'; }
@@ -264,6 +268,7 @@ ${has.sound ? `<button class="icon-btn sound-btn" id="sound-btn" type="button" d
   addEventListener('offline', () => net(false));
   if (q.get('offline') === '1' && helper) { offline = true; history.replaceState(null, '', location.pathname); }
   paintNav(known);
+  if (q.get('slow') === '1' && helper) { history.replaceState(null, '', location.pathname); note.textContent = 'The website is slow to answer right now. Try again in a moment.'; note.hidden = false; setTimeout(() => { if (!offline) note.hidden = true; }, 6000); }
 
   document.addEventListener('click', (e) => {
     const x = e.target.closest?.('[data-close]'); if (x?.closest('dialog')) { x.closest('dialog').close(); return; }
@@ -275,10 +280,11 @@ ${has.sound ? `<button class="icon-btn sound-btn" id="sound-btn" type="button" d
 
   globalThis.PuddleBar = {
     page, here,
-    nav(d) { if (!d) return; if (d.offline) offline = true; else if (navigator.onLine) offline = false; known = d.offline ? (d.teams?.length ? d : known) : d; if (!d.offline) store.set('puddle-nav', JSON.stringify(d)); paintNav(known); paintStatus(); },
+    nav(d) { if (!d) return; if (d.slow) { paintNav(known); return; } if (d.offline) offline = true; else if (navigator.onLine) offline = false; known = d.offline ? (d.teams?.length ? d : known) : d; if (!d.offline) store.set('puddle-nav', JSON.stringify(d)); paintNav(known); paintStatus(); },
     stream(on) { st.stream = on; if (on) st.since = Date.now(); paintStatus(); },
     fetched(how) { st.fetched = how; if (how === 'ok') st.since = Date.now(); paintStatus(); },
     check(c) { st.check = c; paintStatus(); },
+    sync(v) { st.sync = v; paintStatus(); },
     get offline() { return offline; },
     from: (name) => `back=${encodeURIComponent(location.pathname + location.search)}&bt=${encodeURIComponent(String(name || '').slice(0, 40))}`,
     teamName: (id) => (known?.teams || []).find((t) => t.id === id)?.name || null,

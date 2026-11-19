@@ -1,3 +1,5 @@
+import { commandKind, fileExt } from './kinds.js';
+
 export function parseRollout(text) {
   const out = { session: null, prompts: [], reqs: [], steps: [], lines: [], compactions: [] };
   let model = null, effort = null, n = -1;
@@ -8,7 +10,7 @@ export function parseRollout(text) {
     let r; try { r = JSON.parse(line); } catch { continue; }
     const ts = Date.parse(r.timestamp), p = r.payload || {};
     if (r.type === 'session_meta') {
-      out.session = { id: p.id || p.session_id || null, entrypoint: p.originator || null, version: p.cli_version || null, cwd: p.cwd || null };
+      out.session = { id: p.id || p.session_id || null, entrypoint: p.originator || null, version: p.cli_version || null, cwd: p.cwd || null, ...(p.thread_source === 'guardian_review' ? { background: true } : {}) };
       continue;
     }
     if (!ts || !out.session?.id) continue;
@@ -34,11 +36,11 @@ export function parseRollout(text) {
       } else if (it.type === 'CommandExecution') {
         const kind = it.parsed_cmd?.[0]?.type;
         const tool = kind === 'read' ? 'Read' : kind === 'search' ? 'Grep' : kind === 'list_files' ? 'Glob' : 'Bash';
-        out.steps.push({ key: key('tr'), ts, tool, ok: it.exit_code === 0 || (it.exit_code == null && it.status === 'completed'), ms });
+        out.steps.push({ key: key('tr'), ts, tool, ok: it.exit_code === 0 || (it.exit_code == null && it.status === 'completed'), ms, cmd_kind: tool === 'Bash' ? commandKind(it.command) : undefined });
       } else if (it.type === 'McpToolCall') {
         out.steps.push({ key: key('tr'), ts, tool: `mcp__${String(it.server || 'tool').replace(/[^\w-]/g, '_')}__${String(it.tool || 'call').replace(/[^\w-]/g, '_')}`, ok: !it.result?.isError && it.status !== 'failed', ms });
       } else if (it.type === 'FileChange') {
-        out.steps.push({ key: key('tr'), ts, tool: 'Edit', ok: it.status !== 'failed', ms });
+        out.steps.push({ key: key('tr'), ts, tool: 'Edit', ok: it.status !== 'failed', ms, ext: fileExt(Object.keys(it.changes || {})[0]) });
         let added = 0, removed = 0;
         for (const c of Object.values(it.changes || {})) {
           if (c?.unified_diff) for (const l of String(c.unified_diff).split('\n')) { if (l.startsWith('+') && !l.startsWith('+++')) added++; else if (l.startsWith('-') && !l.startsWith('---')) removed++; }

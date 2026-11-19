@@ -1,4 +1,5 @@
-import { hm, esc, todayCard, dayChart } from '/you.js';
+import { esc } from '/you.js';
+import { CARDS, planPill } from '/craft.js';
 import { hover, rows, hideTip, learn } from '/tips.js';
 
 export const CAT = {
@@ -12,14 +13,9 @@ export const CAT = {
 };
 const VERB = { run: 'Running commands', edit: 'Editing code', read: 'Reading code', web: 'Researching', agent: 'Delegating to sub-agents', mcp: 'Using connected tools', other: 'Planning' };
 const FLAG_PATHS = { quiet: '<path d="M13.4 10.4A6.1 6.1 0 0 1 5.6 2.6a6.2 6.2 0 1 0 7.8 7.8z"/>', failures: '<rect x="2.4" y="6.6" width="11.2" height="2.8" rx="1.4" transform="rotate(45 8 8)"/><rect x="2.4" y="6.6" width="11.2" height="2.8" rx="1.4" transform="rotate(-45 8 8)"/>', broken: '<path d="M6.6 2.3a1.6 1.6 0 0 1 2.8 0l5.4 9.6a1.6 1.6 0 0 1-1.4 2.4H2.6a1.6 1.6 0 0 1-1.4-2.4z" opacity=".45"/><rect x="7" y="5" width="2" height="5" rx="1"/><circle cx="8" cy="12" r="1.1"/>', stuck: '<path d="M12.6 6.2A5 5 0 0 0 3.4 6M3.4 9.8a5 5 0 0 0 9.2.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M14 2.6v4.4H9.6z"/><path d="M2 13.4V9h4.4z"/>', hook: '<path d="M10 3.6v5.6a3.6 3.6 0 0 1-7.2 0V8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="3" r="2.2"/>', ratelimit: '<path d="M3.5 1.5h9v2.2c0 1.6-1.4 3-3 4.3 1.6 1.3 3 2.7 3 4.3v2.2h-9v-2.2c0-1.6 1.4-3 3-4.3-1.6-1.3-3-2.7-3-4.3z" opacity=".45"/><path d="M5.4 12.8c0-1.1 1.2-2 2.6-2.8 1.4.8 2.6 1.7 2.6 2.8z"/>', auth: '<circle cx="5" cy="8" r="3.6"/><rect x="7.4" y="6.9" width="7.2" height="2.2" rx="1.1"/><rect x="11.6" y="8" width="2.2" height="3.4" rx="1.1"/>', limit: '<path d="M1.5 11.4a6.5 6.5 0 0 1 13 0z" opacity=".45"/><path d="M8 11.2 11.8 5.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="8" cy="11.2" r="1.9"/>', friction: '<path d="M5.6 1.6c1 0 1.7.8 1.7 1.7v3.4l4.3.8c1 .2 1.7 1.2 1.5 2.2l-.6 3.3c-.2.9-.9 1.5-1.8 1.5H6.6c-.6 0-1.1-.3-1.4-.7l-2.9-3.9a1.2 1.2 0 0 1 1.8-1.6l.5.5V3.3c0-.9.7-1.7 1.6-1.7z"/>', rejects: '<circle cx="8" cy="8" r="6.6" opacity=".45"/><rect x="3.6" y="6.8" width="8.8" height="2.4" rx="1.2"/>', context: '<rect x="2" y="6.8" width="12" height="2.4" rx="1.2"/><path d="M8 1.6v3.2M5.9 3 8 5.1 10.1 3M8 14.4v-3.2M5.9 13 8 10.9l2.1 2.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity=".6"/>', heavy: '<path d="M8 1.6 13.6 7.4H10V14H6V7.4H2.4z"/>', version: '<rect x="2" y="2" width="12" height="12" rx="3" opacity=".45"/><path d="M8 4 11.4 7.6H9.2v4H6.8v-4H4.6z"/>' , oldkey: '<circle cx="5" cy="8" r="3.4"/><rect x="7.5" y="6.9" width="7" height="2.2" rx="1.1"/><rect x="11.6" y="8" width="2" height="3.4" rx="1"/>', offline: '<path d="M8 3a7 7 0 0 1 6.6 4.6l-1.9.7A5 5 0 0 0 3.3 8.3l-1.9-.7A7 7 0 0 1 8 3z"/><path d="M8 7a3.4 3.4 0 0 1 3.2 2.3l-1.9.7a1.4 1.4 0 0 0-2.6 0l-1.9-.7A3.4 3.4 0 0 1 8 7z"/><rect x="1.2" y="7" width="13.6" height="1.8" rx=".9" transform="rotate(45 8 8)"/>', app: '<rect x="7" y="1.5" width="2" height="8" rx="1"/><path d="M4.2 6.6l1.4-1.4L8 7.6l2.4-2.4 1.4 1.4L8 10.4z"/><rect x="2" y="12" width="12" height="2.4" rx="1.2"/>', statusline: '<rect x="1.5" y="10.5" width="13" height="3.5" rx="1.75"/><rect x="1.5" y="2" width="13" height="6.5" rx="1.6" opacity=".45"/>', limits: '<path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 2.4a4.1 4.1 0 1 1 0 8.2 4.1 4.1 0 0 1 0-8.2z" opacity=".45"/><path d="M8 1.5A6.5 6.5 0 0 1 14.5 8h-2.4A4.1 4.1 0 0 0 8 3.9z"/>', titles: '<rect x="2" y="3" width="12" height="2.2" rx="1.1"/><rect x="2" y="7" width="8" height="2.2" rx="1.1" opacity=".45"/><rect x="2" y="11" width="10" height="2.2" rx="1.1" opacity=".45"/>', macerrors: '<path d="M8 1.6l7 12.4H1z"/><rect x="7.1" y="5.6" width="1.8" height="4.6" rx=".9" fill="var(--surface, #fff)"/><circle cx="8" cy="12" r="1" fill="var(--surface, #fff)"/>' , subagents: '<circle cx="8" cy="3.6" r="2.4"/><circle cx="3.4" cy="12" r="2.2" opacity=".55"/><circle cx="12.6" cy="12" r="2.2" opacity=".55"/><rect x="7.1" y="5" width="1.8" height="4" rx=".9"/><path d="M8 8.4 4 10.6M8 8.4l4 2.2" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>', longconvos: '<rect x="2" y="2" width="12" height="2.2" rx="1.1"/><rect x="2" y="5.6" width="12" height="2.2" rx="1.1" opacity=".55"/><rect x="2" y="9.2" width="12" height="2.2" rx="1.1" opacity=".55"/><rect x="2" y="12.8" width="7" height="2.2" rx="1.1" opacity=".35"/>' };
-export const FLAG_IC = Object.fromEntries(Object.entries(FLAG_PATHS).map(([k, v]) => [k, `<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true">${v}</svg>`]));
-const icon = (k) => `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true">${CAT[k]?.ic || ''}</svg>`;
+const FLAG_IC = Object.fromEntries(Object.entries(FLAG_PATHS).map(([k, v]) => [k, `<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true">${v}</svg>`]));
 const ago = (t) => { const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`; };
-const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 const toolName = (t) => String(t || 'unknown').replace(/^mcp__/, '').replace(/__/g, ' · ').replace(/_/g, ' ');
-const catOf = (t) => /^(Read|Grep|Glob|LS|NotebookRead)$/.test(t) ? 'read' : /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(t) ? 'edit'
-  : /^(Bash|BashOutput|KillShell|KillBash|Monitor)$/.test(t) ? 'run' : /^(WebFetch|WebSearch)$/.test(t) ? 'web'
-  : /^(Agent|Task|Skill|Workflow)$/.test(t) ? 'agent' : /^mcp(__|_tool$)/.test(String(t)) ? 'mcp' : 'other';
 
 export function liveState(p) {
   const n = p.now || {}, since = n.lastTs ? Date.now() - n.lastTs : Infinity;
@@ -32,132 +28,63 @@ export function liveState(p) {
   return { kind: 'away', text: seen ? `Away · last active ${ago(seen)} ago` : 'No activity yet', sub: '', c: 'var(--axis)' };
 }
 
-function workCard(p, tools) {
-  const tot = Object.values(p.mix || {}).reduce((a, b) => a + b, 0);
-  const kinds = Object.entries(p.mix || {}).filter(([, v]) => v).sort((a, b) => b[1] - a[1]);
-  const list = kinds.map(([k, v]) => `<div class="wk-row" data-k="${k}"><span class="wk-l" style="--c:${CAT[k].c}">${icon(k)}${CAT[k].label}</span>
-    <div class="wk-b"><i style="width:${pct(v, kinds[0][1])}%;background:${CAT[k].c}"></i></div><b>${pct(v, tot)}%</b><small>${v.toLocaleString()} steps</small></div>`).join('');
-  return `<section class="card pv-work" data-learn="pv:work"><header><h2>What the agent worked on</h2><span class="muted">${tot.toLocaleString()} steps</span></header>
-    ${tot ? `<div class="wkinds">${list}</div>` : '<p class="muted">No agent steps in this period.</p>'}</section>`;
-}
-
-const pad2 = (n) => String(n).padStart(2, '0');
-const clock = (t) => { const d = new Date(t); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
-const PLAN_OLD = 30 * 60_000;
-const whenText = (reset, ts) => {
-  const parts = [];
-  if (reset) { const d = new Date(reset); parts.push(`resets ${d.toDateString() === new Date().toDateString() ? clock(reset) : `${d.toLocaleDateString([], { weekday: 'short' })} ${clock(reset)}`}`); }
-  if (!reset || Date.now() - ts > PLAN_OLD) parts.push(`as of ${ago(ts)} ago`);
-  return parts.join(' · ');
-};
-function planCard(plan) {
-  const line = (label, v, reset, ts) => (v == null ? '' : `<div class="pl-row${v >= 95 ? ' hot' : v >= 80 ? ' warm' : ''}${Date.now() - ts > PLAN_OLD ? ' old' : ''}"><span class="pl-l">${label}</span>
-    <span class="pl-b"><i style="width:${Math.max(2, v)}%"></i></span><span class="pl-v"><b>${Math.round(v)}% used</b> · ${Math.max(0, 100 - Math.round(v))}% left</span><small>${whenText(reset, ts)}</small></div>`);
-  const body = plan?.stale
-    ? `<p class="muted">Unknown right now: no reading since the window started over (last one ${whenText(null, plan.seen).replace('as of ', '')}). Some apps never report plan limits (VS Code, scripts); they show when the terminal, the Claude app or Codex is used.</p>`
-    : plan?.agents?.length
-    ? plan.agents.map((a) => `${plan.agents.length > 1 ? `<h3 class="pl-a">${esc(a.label || 'Claude')}</h3>` : ''}${line('5 hours', a.five_pct, a.five_reset, a.five_ts ?? a.ts)}${line('Week', a.week_pct, a.week_reset, a.week_ts ?? a.ts)}${line(a.month_from === 'claude-code' ? 'Spend' : 'Month', a.month_pct, a.month_reset, a.month_ts ?? a.ts)}`).join('')
-    : '<p class="muted">Not seen yet. It shows once Puddle sees the Claude app or Codex being used on this Mac.</p>';
-  return `<section class="card pv-plan" data-learn="pv:plan"><header><h2>Plan limits</h2>${plan?.agents?.length === 1 ? `<span class="muted">${esc(plan.agents[0].label || '')}</span>` : ''}</header>${body}</section>`;
-}
-
-function sizeCard(p) {
-  const c = p.context; if (!c) return '';
-  const lvl = c.full >= 2 || c.max >= 98 ? ' hot' : c.typical >= 70 || c.full ? ' warm' : '';
-  return `<section class="card pv-size" data-learn="pv:size"><header><h2>Conversation size</h2></header>
-    <div class="sz${lvl}"><span class="sz-b"><i style="width:${Math.max(2, c.typical)}%"></i><em style="left:${Math.min(100, c.max)}%"></em></span>
-      <span class="sz-v"><b>${c.typical}%</b> of what the model can hold, usually</span></div>
-    <ul class="sz-facts"><li><b>${c.max}%</b> the largest</li><li><b>${c.full}</b> of ${c.sessions} nearly full (90%+)</li><li><b>${p.compactions || 0}</b> squeezed to make room</li></ul></section>`;
-}
-
-function projectsCard(recent = [], links = {}, range = '7d') {
-  if (!recent.length) return '';
-  return `<section class="card pv-projects" data-learn="pv:projects"><header><h2>Recent conversations</h2></header>
-    ${globalThis.recentHTML(recent, { time: mins, ago, href: links.project ? (c) => links.project(c, range) : null, seeAll: links.work ? links.work(range) : null })}</section>`;
-}
-
-function handsCard(p) {
-  const r = p.runs || {}, short = Math.max(0, (r.prompts || 0) - (r.long || 0) - (r.chat || 0));
-  const seg = (n, c, label) => (n ? `<i style="flex:${n};background:${c}" data-seg="${label}" data-n="${n}"></i>` : '');
-  const word = !r.prompts ? '—' : r.long / r.prompts >= 0.15 ? 'Long tasks' : r.chat / r.prompts >= 0.5 ? 'Questions' : 'Short tasks';
-  return `<section class="card pv-hands" data-learn="pv:hands"><header><h2>Task size</h2><span class="muted">${(r.prompts || 0).toLocaleString()} prompts</span></header>
-    <p class="big-word">${word}</p>
-    ${r.prompts ? `<div class="hbar">${seg(r.chat, 'var(--k-think)', 'Questions')}${seg(short, 'var(--s1)', 'Short tasks')}${seg(r.long, 'var(--s7)', 'Long tasks')}</div>
-    <div class="hleg"><span><i style="background:var(--k-think)"></i>Questions ${r.chat}</span><span><i style="background:var(--s1)"></i>Short tasks ${short}</span><span><i style="background:var(--s7)"></i>Long tasks (20+ steps) ${r.long}</span></div>` : ''}
-    <dl class="facts">
-      <div><dt>Steps per prompt</dt><dd>${p.toolsPerPrompt == null ? '—' : p.toolsPerPrompt.toFixed(1)}</dd></div>
-      <div><dt>Longest run</dt><dd>${r.longest || 0} steps</dd></div>
-      <div><dt>Auto-approved</dt><dd>${p.autoApproved == null ? '—' : `${Math.floor(p.autoApproved * 100)}%`}</dd></div>
-      <div><dt>Stopped by hand</dt><dd>${(p.rejects || 0).toLocaleString()}</dd></div>
-    </dl></section>`;
-}
-
-function flagsCard(p) {
-  const f = p.flags || [];
+function flagsCard(p, size) {
+  const full = p.context?.full ? [{ kind: 'context', level: 'info', text: `${p.context.full} conversation${p.context.full === 1 ? '' : 's'} got nearly full (90%+)` }] : [];
+  const f = [...(p.flags || []), ...full];
+  if (!f.length) return '';
+  if (size === 's') return `<section class="card cr cr-s cr-flags issues" data-sz="s" data-learn="pv:flags"><header><h2>Needs a look</h2></header><p class="cr-big">${f.length}</p>
+    <p class="cr-line">${f.length === 1 ? 'thing to check' : 'things to check'}</p><div class="cr-fl">${f.map((x) => `<span class="cr-fi ${x.level}" title="${esc(x.text)}">${FLAG_IC[x.kind] || '!'}</span>`).join('')}</div>
+    <p class="cr-flt">${esc(f[0].text)}</p></section>`;
+  if (size === 'm') return `<section class="card cr cr-m cr-flags issues pv-flags" data-sz="m" data-learn="pv:flags"><header><h2>Needs a look</h2></header><div class="cr-fm"><div><p class="cr-big">${f.length}</p><p class="cr-line">${f.length === 1 ? 'thing to check' : 'things to check'}</p></div>
+    <ul class="attention">${f.map((x) => `<li class="att ${x.level}${x.acknowledged ? ' ack' : ''}"><span class="att-ic">${FLAG_IC[x.kind] || '!'}</span><span class="att-t">${esc(x.text)}</span></li>`).join('')}</ul></div></section>`;
   return `<section class="card issues pv-flags" data-learn="pv:flags"><header><h2>Needs a look</h2>${f.length ? `<span class="chip">${f.length}</span>` : ''}</header>
     ${f.length ? `<ul class="attention">${f.map((x) => `<li class="att ${x.level}${x.acknowledged ? ' ack' : ''}"><span class="att-ic">${FLAG_IC[x.kind] || '!'}</span><span class="att-t">${esc(x.text)}</span></li>`).join('')}</ul>`
       : '<p class="ok">✓ Nothing needs a look</p>'}</section>`;
 }
 
-const hh = (h) => `${String(h).padStart(2, '0')}:00`;
-const mins = (m) => (m >= 60 ? `${hm(m)} h` : m > 0 && m < 1 ? 'under 1 min' : `${Math.round(m)} min`);
 function attachTips(el, p, r, tools, st, fresh) {
-  const runs = p.runs || {}, n = p.now || {};
+  const n = p.now || {};
   const stEl = fresh.has('head') && el.querySelector('.pv-state');
   if (stEl) { stEl.dataset.learn = 'pv:state';
     hover(stEl, () => `<b>${esc(st.text)}</b>` + rows([['Last tool', esc(toolName(n.tool || '—'))], ['Last step', n.lastTs ? `${ago(n.lastTs)} ago` : '—'], ['Last prompt', n.promptTs ? `${ago(n.promptTs)} ago` : '—']])); }
-  const tot = Object.values(p.mix || {}).reduce((a, b) => a + b, 0);
-  for (const row of fresh.has('work') ? el.querySelectorAll('.wk-row') : []) {
-    const kind = row.dataset.k, mine = tools.filter((t) => catOf(t.tool) === kind);
-    hover(row, () => `<b>${CAT[kind].label}</b>` + rows([['Steps', (p.mix[kind] || 0).toLocaleString()], ['Share', `${pct(p.mix[kind] || 0, tot)}%`],
-      ...mine.slice(0, 4).map((t) => [toolName(t.tool), t.calls.toLocaleString(), CAT[kind].c])]));
-  }
-  for (const seg of fresh.has('hands') ? el.querySelectorAll('.hbar [data-seg]') : []) hover(seg, () => `<b>${esc(seg.dataset.seg)}</b>` + rows([['Prompts', seg.dataset.n], ['Share', `${pct(+seg.dataset.n, runs.prompts || 0)}%`]]));
-  const day = fresh.has('today') && el.querySelector('#you-day'); if (day) { day.closest('.card').dataset.learn = 'pv:day';
-    hover(day, (e) => { const b = day.getBoundingClientRect(), h = Math.max(0, Math.min(23, Math.floor(((e.clientX - b.left) / b.width) * 24)));
-      return `<b>${hh(h)}–${hh(h + 1)}</b>` + rows([['Today', mins(r.today.byHour[h] || 0), 'var(--s2)'], ['Typical day', mins(r.typicalDay[h] || 0), 'var(--axis)']]); }); }
+  const plan = fresh.has('head') && el.querySelector('[data-plan]');
+  if (plan) hover(plan, () => (p.plan?.agents || []).map((a) => `<b>${esc(a.label || 'Plan')}</b>` + rows([['5 hours', a.five_pct], ['Week', a.week_pct], [a.month_from === 'claude-code' ? 'Spend' : 'Month', a.month_pct]]
+    .filter(([, v]) => v != null).map(([l, v]) => [l, `${Math.round(v)}% used`, v >= 95 ? 'var(--critical)' : v >= 80 ? 'var(--warn)' : 'var(--s1)']))).join(''));
 }
 
-const RANGES = { '1d': ['1D', 1], '7d': ['7D', 7], '30d': ['30D', 30], '90d': ['90D', 90] };
+const RANGES = { '7d': ['Last 7 days', 7], '30d': ['Last 30 days', 30], '90d': ['Last 90 days', 90] };
 
-export function mountPerson(el, { api, cards = null, stream = null, you = false, back = null, links = {}, fixed = null }) {
-  let range = '7d', data = null, timer = null;
-  try { range = localStorage.getItem('pv-range') || '7d'; } catch {}
+export function mountPerson(el, { api, cards = null, stream = null, you = false, back = null, links = {} }) {
+  let range = '7d', data = null, win = null;
+  try { range = sessionStorage.getItem('pv-range') || '7d'; } catch {}
   if (!RANGES[range]) range = '7d';
   const headRange = document.querySelector('header.bar #range'), headLearn = document.querySelector('header.bar #learn-btn');
   if (headLearn) headLearn.onclick = () => { learn.on = !learn.on; hideTip(); draw(); };
   const paintBar = () => {
     if (headRange) {
       for (const b of headRange.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.r === range));
-      for (const b of headRange.querySelectorAll('button')) b.onclick = () => { range = b.dataset.r; try { localStorage.setItem('pv-range', range); } catch {} paintBar(); load(); };
+      for (const b of headRange.querySelectorAll('button')) b.onclick = () => { range = b.dataset.r; try { sessionStorage.setItem('pv-range', range); } catch {} paintBar(); load(); };
     }
     headLearn?.setAttribute('aria-pressed', String(learn.on));
   };
   paintBar();
   let held = false;
-  const layout = Layout.mount('person', el, { fixed, load: Layout.account.load, save: Layout.account.save,
-    onShow: (id) => { if (id === 'recent') load(); else if (id === 'calendar' || id === 'lines') { draw(); if (lastParams) fetchCard(id, lastParams); } else draw(); },
-    onDone: () => { if (held) { held = false; draw(); } }, onResize: () => requestAnimationFrame(draw) });
-  const cardsHTML = (p, r, tools) => {
-    const built = {
-      work: () => workCard(p, tools),
-      recent: () => projectsCard(data.recent || [], links, range),
-      lines: () => (data.codeLines?.length || (cards && data.codeLines === undefined && globalThis.PuddleShape?.row('lines')) ? '<section class="card pv-lines" data-learn="pv:lines"><header><h2>Code changes</h2></header><div id="pv-lines"></div></section>' : ''),
-      today: () => todayCard(r.today, { typical: r.typicalDay, nowHour: ((r.now + r.tz * 60_000) % 864e5) / 36e5 }),
-      prompts: () => (you || cards ? '<section class="card pv-prompts" data-learn="pv:prompts"></section>' : ''),
-      plan: () => (you || p.plan ? planCard(p.plan) : ''),
-      size: () => sizeCard(p), flags: () => flagsCard(p), hands: () => handsCard(p),
-      calendar: () => '<section class="card pv-cal" data-learn="pv:rhythm"><header><h2>Tokens per day</h2></header><div class="cal" id="pv-cal"></div></section>',
-    };
-    const drawnBy = { today: () => JSON.stringify([r.today.byHour, r.typicalDay, r.now]), prompts: () => JSON.stringify(data.lastDay || null), calendar: () => JSON.stringify([data.daily || [], data.range?.from]),
-      lines: () => JSON.stringify([data.codeLines || [], data.range?.from]) };
-    return Object.entries(built).filter(([id]) => layout.visible(id)).map(([id, make]) => {
+  const layout = Layout.mount('person', el, { load: Layout.account.load, save: Layout.account.save,
+    onShow: (id) => { draw(); const card = { squares: 'calendar', leverage: 'calendar', shipped: 'lines' }[id]; if (card && lastParams) fetchCard(card, lastParams); },
+    onDone: () => { if (held) { held = false; draw(); } }, onResize: () => requestAnimationFrame(() => draw(true)) });
+  const ctxOf = (p, r) => ({ data, p, r, win, period: RANGES[range][0] });
+  const cardsHTML = (p, r) => {
+    const ctx = ctxOf(p, r);
+    const made = Object.entries(CARDS).map(([id, c]) => [id, () => c.html({ ...ctx, size: layout.size(id) || 'm' })]);
+    made.push(['flags', () => flagsCard(p, layout.size('flags'))]);
+    const sig = JSON.stringify([range, win?.from, data.daily?.length, data.work, data.codeLines, r?.today, r?.heat ? Math.floor(r.now / 36e5) : 0]);
+    return made.filter(([id]) => layout.visible(id)).map(([id, make]) => {
       const html = make().replace(/^\s*<(\w+)/, `<$1 data-card="${id}"`);
-      return { key: id, html, sig: html + (drawnBy[id]?.() || '') };
+      return { key: id, html, sig: html + (CARDS[id]?.draw ? sig : '') };
     });
   };
   const parts = new Map(), seen = new Set();
-  const waiting = { prompts: () => data.lastDay === undefined, lines: () => data.codeLines === undefined, calendar: () => data.daily === undefined };
+  const waiting = { squares: () => data.daily === undefined, leverage: () => data.daily === undefined, shipped: () => data.codeLines === undefined };
   function patch(list) {
     const keep = new Set(), fresh = new Set();
     for (const { key, html, sig } of list) {
@@ -167,91 +94,103 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
       if (had?.node.parentNode === el && had.sig === sig) continue;
       const t = document.createElement('template'); t.innerHTML = html.trim();
       const node = t.content.firstElementChild; if (!node) continue;
-      const row = had?.node.parentNode === el ? had.node.style.gridRowEnd : globalThis.PuddleShape?.row(key);
-      if (row) node.style.gridRowEnd = row;
+      const col = had?.node.parentNode === el ? had.node.style.gridColumn : globalThis.PuddleShape?.row(key);
+      if (col && col !== 'auto') node.style.gridColumn = col;
+      if (had?.node.parentNode === el && had.node.style.gridRow) node.style.gridRow = had.node.style.gridRow;
       if (cards && waiting[key]?.()) globalThis.PuddleShape ? PuddleShape.hold(node, key) : (node.dataset.wait = '1');
       else if (key !== 'head' && !seen.has(key)) { seen.add(key); node.classList.add('card-in'); setTimeout(() => node.classList.remove('card-in'), 600); }
-      if (had?.node.parentNode === el) had.node.replaceWith(node);
+      if (had?.node.parentNode === el) { const focused = had.node === document.activeElement; had.node.replaceWith(node); if (focused) queueMicrotask(() => node.focus({ preventScroll: true })); }
       else { const next = list.slice(list.findIndex((x) => x.key === key) + 1).map((x) => parts.get(x.key)?.node).find((n) => n?.parentNode === el); el.insertBefore(node, next || null); }
       parts.set(key, { node, sig }); fresh.add(key);
     }
     for (const [k, v] of parts) if (!keep.has(k)) { v.node.remove(); parts.delete(k); }
     return fresh;
   }
-  const draw = () => {
+  const draw = (sized = false) => {
     if (!data || document.body.classList.contains('leaving')) return;
-    if (layout.arranging()) { held = true; return; }
+    if (layout.arranging() && sized !== true) { held = true; return; }
     const { person: p, rhythm: r, tools } = data, st = liveState(p);
     const name = you ? 'Me' : (p.name || (p.email || '').split('@')[0] || 'Someone');
     document.body.dataset.who = name;
-    if (!you && !fixed) globalThis.PuddleBar?.title(name);
-    const head = you || fixed ? `<div class="pv-bar"><span class="pv-state ${st.kind}" style="--c:${st.c}"><i></i>${esc(st.text)}</span>${fixed ? '' : globalThis.signalsHTML?.(p) || ''}</div>`
+    if (!you) globalThis.PuddleBar?.title(name);
+    const head = you ? `<div class="pv-bar"><span class="pv-state ${st.kind}" style="--c:${st.c}"><i></i>${esc(st.text)}</span>${globalThis.signalsHTML?.(p) || ''}${you ? planPill(p.plan) : ''}</div>`
       : `<section class="card pv-head" style="--c:${st.c}">
         <div class="pv-who"><h1>${esc(name)}${globalThis.signalsHTML?.(p) || ''}</h1><span class="pv-state ${st.kind}"><i></i>${esc(st.text)}${st.sub ? ` <small>· ${esc(st.sub)}</small>` : ''}</span></div>
       </section>`;
     if (!parts.size) el.innerHTML = '';
-    const fresh = patch([{ key: 'head', html: head, sig: head }, ...cardsHTML(p, r, tools)]);
+    const fresh = patch([{ key: 'head', html: head, sig: head }, ...cardsHTML(p, r)]);
     layout.apply();
-    const nowHour = ((r.now + r.tz * 60_000) % 864e5) / 36e5;
-    if (fresh.has('today') && el.querySelector('#you-day')) dayChart(el.querySelector('#you-day'), r.typicalDay, r.today.byHour, nowHour);
-    if (fresh.has('prompts')) globalThis.mountPrompts?.(parts.get('prompts')?.node, data.lastDay, { hover, rows });
-    if (fresh.has('calendar') && el.querySelector('#pv-cal')) globalThis.mountCalendar(el.querySelector('#pv-cal'), data.daily || [], { from: data.range?.from ?? r.now, now: r.now, onDraw: (byDay) => {
-      for (const c of el.querySelectorAll('#pv-cal .cal-g .cal-d')) hover(c, () => { const x = byDay.get(c.dataset.day) || {};
-        return `<b>${esc(globalThis.calDayName(c.dataset.day))}</b>` + rows([['Tokens', globalThis.calTok(x.tokens)], ['Prompts', (x.prompts || 0).toLocaleString()]]); });
-    } });
+    const opt = { hover, rows }, ctx = ctxOf(p, r);
+    for (const [id, c] of Object.entries(CARDS)) if (c.draw && fresh.has(id)) c.draw(parts.get(id).node, ctx, opt);
     document.body.classList.toggle('learn', learn.on);
     paintBar();
-    if (fresh.has('lines') && data.codeLines?.length && el.querySelector('#pv-lines')) globalThis.mountCodeLines(el.querySelector('#pv-lines'), data.codeLines, { from: data.range?.from ?? r.now, now: r.now, hover, rows });
     if (fresh.has('head')) for (const g of parts.get('head').node.querySelectorAll('.sig')) hover(g, () => globalThis.signalTip(g.dataset.sig, p));
     attachTips(el, p, r, tools, st, fresh);
   };
-  let busy = false, more = false, shown = null;
+  let busy = false, more = false, shown = null, staleTries = 0, staleTimer = null;
+  const mounted = Date.now(), local = you && document.body.classList.contains('personal');
+  const kept = () => { try { return local ? localStorage : sessionStorage; } catch { return null; } };
   async function load() {
     if (busy) { more = true; return; }
     busy = true;
     try { await loadOnce(); } finally { busy = false; if (more) { more = false; load(); } }
   }
   async function loadOnce() {
-    const days = RANGES[range][1], to = Date.now() + 60_000;
-    const from = Date.now() - days * 864e5;
+    const { from, to } = PuddleWhen.window(RANGES[range][1]);
+    win = { from, to };
     const params = { from, to, tz: -new Date().getTimezoneOffset() };
-    const key = `joule-person:${location.pathname}${location.search}|${range}|${layout.visible('recent') ? '' : 'skip'}`;
+    const key = `puddle-person:${location.pathname}${location.search}|${range}|${layout.visible('recent') ? '' : 'skip'}`;
     if (shown !== key) {
       shown = key;
-      try { const v = JSON.parse(sessionStorage.getItem(key) || 'null'); if (v && Date.now() - v.at < 30 * 60_000) { Object.assign(cardData, v.cards || {}); data = { ...v.data, ...cardData }; draw(); globalThis.PuddlePerf?.drawn(you ? 'me' : 'person'); } } catch {}
+      let hit = false;
+      try { const v = JSON.parse(kept()?.getItem(key) || 'null'); if (v && Date.now() - v.at < (local ? 7 * 864e5 : 30 * 60_000)) { hit = true; Object.assign(cardData, v.cards || {}); data = { ...v.data, ...cardData }; draw(); globalThis.PuddlePerf?.drawn(you ? 'me' : 'person'); if (local) globalThis.PuddleBar?.sync({ at: v.at }); } } catch {}
+      if (local && !hit && !data) globalThis.PuddleBar?.sync({});
     }
     lastParams = params;
-    if (cards) layout.ready.then(() => { for (const c of ['lines', 'prompts']) if (layout.visible(c)) fetchCard(c, params); });
+    if (cards) layout.ready.then(() => { if (layout.visible('shipped')) fetchCard('lines', params); });
     const bar = globalThis.PuddleBar;
     let res;
-    try { res = await fetch(api(params) + (cards ? '&parts=core' : '') + (layout.visible('recent') ? '' : '&skip=recent')); } catch { bar?.fetched('fail'); return; }
+    const retry = (why) => {
+      if (data) return;
+      if (local && Date.now() - mounted < 30_000) { clearTimeout(retryTimer); retryTimer = setTimeout(load, 2000); return; }
+      parts.clear();
+      el.innerHTML = `<section class="card pv-empty"><h2>${you ? 'Waiting for Puddle on this Mac' : 'This page can\'t be reached right now'}</h2><p class="muted">${esc(why)} Trying again by itself.</p></section>`;
+      clearTimeout(retryTimer); retryTimer = setTimeout(load, 5000);
+    };
+    try { res = await fetch(api(params) + (cards ? '&parts=core' : '') + (layout.visible('recent') ? '' : '&skip=recent')); } catch { bar?.fetched('fail'); retry(you ? 'It isn\'t answering yet.' : 'No connection.'); return; }
     if (!res.ok && res.status !== 404 && data) { bar?.fetched(res.status === 503 ? 'busy' : 'fail'); return; }
     bar?.fetched('ok');
+    const stale = Number(res.headers.get('x-puddle-stale')) || 0;
+    if (local) bar?.sync(stale && res.ok ? { at: Date.now() - stale * 1000 } : null);
+    if (stale && staleTries < 4) { staleTries++; lastLoad = 0; clearTimeout(staleTimer); staleTimer = setTimeout(() => load(), 2500 * staleTries); } else if (!stale) staleTries = 0;
     if (!res.ok) {
-      const empty = fixed ? '<p class="muted">Nothing to show here yet.</p>' : you ? '<h2>Nothing here yet</h2><p class="muted">This page fills in by itself once Puddle runs on your Mac and you work with Claude Code. Just installed Puddle? Quit and reopen Claude Code once.</p>'
+      const empty = you ? '<h2>Nothing here yet</h2><p class="muted">This page fills in by itself once you work with Claude Code or Codex on this Mac.</p>'
         : '<p class="muted">Nothing to show for this person here: no shared work yet.</p>';
+      if (res.status !== 404) { retry('It answered with an error.'); return; }
       parts.clear();
-      el.innerHTML = `<section class="card" style="grid-column:1/-1">${res.status === 404 ? empty : '<p class="muted">Could not load this page.</p>'}</section>`; return;
+      lastLoad = 0;
+      el.innerHTML = `<section class="card pv-empty">${empty}</section>`; return;
     }
     const fresh = await res.json();
-    try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data: fresh, cards: cardData })); } catch {  }
+    try { kept()?.setItem(key, JSON.stringify({ at: Date.now(), data: fresh, cards: cardData })); } catch {  }
     data = { ...fresh, ...cardData };
     draw();
     globalThis.PuddlePerf?.drawn(you ? 'me' : 'person'); globalThis.PuddleHeal?.drawn();
     if (cards) {
       await layout.ready;
-      if (!layout.visible('calendar')) return;
+      if (!layout.visible('squares') && !layout.visible('leverage')) return;
       if (calSeen) fetchCard('calendar', params);
       else watchCal(params);
     }
   }
   const cardData = {};
-  let calSeen = false, lastParams = null;
+  let calSeen = false, lastParams = null, retryTimer = null;
   async function fetchCard(name, params) {
     const r = await fetch(cards(name, params)).then((x) => (x.ok ? x.json() : null)).catch(() => null);
-    if (!r || params !== lastParams) return;
+    if (params !== lastParams) return;
+    if (!r) { if (name === 'calendar' && data && data.daily === undefined) { cardData.daily = []; data.daily = []; draw(); } return; }
     Object.assign(cardData, r);
-    try { const v = JSON.parse(sessionStorage.getItem(shown) || 'null'); if (v) sessionStorage.setItem(shown, JSON.stringify({ ...v, cards: cardData })); } catch {}
+    try { const v = JSON.parse(kept()?.getItem(shown) || 'null'); if (v) kept()?.setItem(shown, JSON.stringify({ ...v, cards: cardData })); } catch {}
     if (!data) return;
     Object.assign(data, r); draw(); globalThis.PuddlePerf?.card(name);
   }
@@ -259,8 +198,8 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
   function watchCal(params) { calParams = params; nearCal(); }
   function nearCal() {
     if (calSeen || !calParams) return;
-    const c = el.querySelector('.pv-cal');
-    if (!layout.visible('calendar')) return;
+    const c = el.querySelector('.cr-squares') || el.querySelector('.cr-leverage');
+    if (!layout.visible('squares') && !layout.visible('leverage')) return;
     if (!c || c.getBoundingClientRect().top < (innerHeight || 800) + 600) { calSeen = true; fetchCard('calendar', calParams); }
   }
   addEventListener('scroll', nearCal, { passive: true });

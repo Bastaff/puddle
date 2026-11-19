@@ -32,7 +32,7 @@
       }
       return `<div class="cal-m"><b>${MONTHS[m]}${y !== today.getFullYear() ? ` ${String(y).slice(2)}` : ''}</b><div class="cal-g">${cells}</div></div>`;
     }).join('')}</div>
-    <div class="cal-key" aria-hidden="true"><span>Less</span>${[0, 1, 2, 3, 4, 5].map((l) => `<i class="cal-d l${l}"></i>`).join('')}<span>More</span></div>`;
+    ${vals.length ? '' : '<p class="muted card-none">Each day fills in as work happens.</p>'}<div class="cal-key" aria-hidden="true"><span>Less</span>${[0, 1, 2, 3, 4, 5].map((l) => `<i class="cal-d l${l}"></i>`).join('')}<span>More</span></div>`;
     onDraw?.(byDay);
   }
 

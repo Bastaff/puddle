@@ -7,6 +7,13 @@ const ctx = { localStorage: { getItem: () => null, setItem() {} } };
 vm.runInNewContext(fs.readFileSync(new URL('../collector/public/learn.js', import.meta.url), 'utf8') + '\nthis.LEARN = LEARN;', ctx);
 const { LEARN } = ctx;
 
+test('every card on Me has an explanation in learn mode', () => {
+  const lc = {}; vm.runInNewContext(fs.readFileSync(new URL('../collector/public/layout.js', import.meta.url), 'utf8'), lc);
+  const ids = lc.Layout.PAGES.person.map((c) => c.id);
+  assert.ok(ids.length >= 9, ids.join());
+  for (const id of ids) assert.ok(LEARN.explain(id === 'flags' ? 'pv:flags' : `cr:${id}`).length > 40, id);
+});
+
 test('learn mode explains built-in tools, MCP tools and dashboard parts in plain words', () => {
   assert.match(LEARN.tool('Bash'), /built-in Claude Code tool.*terminal/);
   const mcp = LEARN.tool('mcp__Claude_Browser__browser_batch');

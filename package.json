@@ -1,8 +1,16 @@
 {
   "name": "puddle",
-  "version": "0.0.5",
-  "description": "Puddle: a Mac menu bar app and a team website showing how people use their coding agents (Claude Code, Codex). Counts and timings only, never prompts or code",
+  "version": "0.0.6",
+  "description": "Puddle: a Mac menu bar app showing how people use their coding agents (Claude Code, Codex). Counts and timings only, never prompts or code",
   "license": "MIT",
+  "homepage": "https://puddle.rip",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bastaff/puddle.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Bastaff/puddle/issues"
+  },
   "type": "module",
   "private": true,
   "engines": {
@@ -10,8 +18,8 @@
   },
   "scripts": {
     "test": "node scripts/test.mjs",
+    "test:changed": "node scripts/test-for.mjs",
     "companion": "node --disable-warning=ExperimentalWarning companion/server.js",
-    "verify": "node --disable-warning=ExperimentalWarning scripts/verify.mjs",
     "dev:app": "node scripts/dev-app.mjs"
   },
   "dependencies": {

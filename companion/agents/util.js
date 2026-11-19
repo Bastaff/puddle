@@ -28,10 +28,6 @@ export function walk(dir, test, out = [], depth = 0) {
   return out;
 }
 
-export function eachLine(file, fn) {
-  let text; try { text = fs.readFileSync(file, 'utf8'); } catch { return; }
-  eachRecord(text, fn);
-}
 export function eachRecord(text, fn) {
   for (const line of text.split('\n')) { if (!line) continue; let r; try { r = JSON.parse(line); } catch { continue; } if (fn(r) === false) return; }
 }

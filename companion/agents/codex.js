@@ -1,9 +1,18 @@
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import { readJson, exists, cleanTitle, onPath, editorExtensions, existing, uniqInstalls, walk, eachRecord, jwtClaims } from './util.js';
 import { makeFollower } from '../../collector/lines.js';
 
 const read = makeFollower(() => ({ meta: null, rows: [] }));
+const whole = (f, st) => {
+  const was = read.logs.get(f);
+  if (was && was.size === st.size && was.mtime === st.mtimeMs) return { s: was, text: '' };
+  const s = { ino: st.ino, offset: st.size, size: st.size, mtime: st.mtimeMs, meta: null, rows: [] };
+  read.logs.set(f, s);
+  let text = ''; try { text = zlib.zstdDecompressSync(fs.readFileSync(f)).toString('utf8'); } catch {}
+  return { s, text };
+};
 
 const WORK = /^(team|business|self_serve_business|ent|enterprise|edu|education|hc)/;
 const PLAN_NAMES = { free: 'Free', go: 'Go', plus: 'Plus', pro: 'Pro', prolite: 'Pro', promax: 'Pro', team: 'Business', business: 'Business', enterprise: 'Enterprise', edu: 'Edu' };
@@ -57,15 +66,15 @@ export default {
   context: () => ({ extraAccounts: [] }),
   sessions(h, since) {
     const out = [], titles = codexTitles(h.dir);
-    for (const f of walk(path.join(h.dir, 'sessions'), (n) => n.startsWith('rollout-') && n.endsWith('.jsonl'))) {
+    for (const f of walk(path.join(h.dir, 'sessions'), (n) => n.startsWith('rollout-') && (n.endsWith('.jsonl') || n.endsWith('.jsonl.zst')))) {
       let st; try { st = fs.statSync(f); } catch { continue; }
       if (st.mtimeMs < since) { read.logs.delete(f); continue; }
       const s = { tool: 'codex', account: h.account, cwd: null, repo: null, times: [], prompts: 0, surface: null, title: null, titleSource: null };
       let events = 0, items = 0;
-      const { s: log, text } = read.follow(f, st);
+      const { s: log, text } = f.endsWith('.zst') ? whole(f, st) : read.follow(f, st);
       eachRecord(text, (r) => {
         const t = Date.parse(r.timestamp);
-        if (r.type === 'session_meta') { const p = r.payload || {}; log.meta = { cwd: p.cwd, repo: p.git?.repository_url || null, surface: p.originator || null, id: p.id || p.session_id || null, creator: p.creator_account_id || null }; }
+        if (r.type === 'session_meta') { const p = r.payload || {}; log.meta = { cwd: p.cwd, repo: p.git?.repository_url || null, surface: p.originator || null, id: p.id || p.session_id || null, creator: p.creator_account_id || null, background: p.thread_source === 'guardian_review' }; }
         if (!t) return;
         const rl = r.type === 'event_msg' && r.payload?.type === 'token_count' ? r.payload.rate_limits || r.payload.info?.rate_limits : null;
         log.rows.push([t, r.type === 'event_msg' && r.payload?.type === 'user_message',
@@ -86,7 +95,7 @@ export default {
       s.prompts = events || items;
       const name = s.id && titles.get(s.id);
       if (name) { s.title = name; s.titleSource = 'index'; }
-      if (s.cwd && s.times.length) out.push(s);
+      if (s.cwd && s.times.length && !log.meta?.background) out.push(s);
     }
     return out;
   },

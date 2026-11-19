@@ -1,12 +1,16 @@
-## Description
-<!-- Provide a clear, concise summary of the changes and the architectural rationale. -->
+## What it changes
 
-## Related Issues
-<!-- Link relevant issue or architectural discussion, e.g. Closes #123 -->
+One or two sentences on what this changes for someone using Puddle.
 
-## Architectural & Invariant Checklist
-- [ ] **Zero-Content Ingestion Boundary**: Verified that no prompt text, completions, code snippets, command parameters, or local filesystem paths are ingested, persisted, or transmitted.
-- [ ] **Schema Invariant**: If telemetry or sync payloads were modified, changes are reflected in `companion/mirror.js` (`SENT`) and formally documented in [DATA.md](DATA.md).
-- [ ] **Network Isolation**: Verified that local webviews and daemon interfaces remain dependency-free without external CDN references.
-- [ ] **Automated Tests**: Unit test suite passes locally (`npm test`) including contract verification (`test/mirror-fields.test.js`).
-- [ ] **Code Hygiene**: No comments in code (names and tests say why), no dead code or leftover notes.
+## Related issue
+
+Closes #
+
+## Checks
+
+- [ ] Nothing new is read or kept beyond counts, lengths, timings and the names `DATA.md` lists: no prompt or answer
+      text, code, commands, file paths or file contents.
+- [ ] Anything new that leaves the Mac is in `SENT` (`companion/mirror.js`) and in `DATA.md`.
+- [ ] Pages load nothing from another site.
+- [ ] `npm test` passes, including `test/mirror-fields.test.js`.
+- [ ] No comments, dead code or leftover notes.

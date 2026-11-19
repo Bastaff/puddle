@@ -4,7 +4,8 @@ import * as R from './flags.js';
 import { asSql } from './sql.js';
 import { WINNERS, daySplit, doneDays, pqReady, TOOL_CATEGORY, CATEGORIES } from './fast.js';
 import { activeSegments, rhythm } from './forecast.js';
-import { profile, teamSummary, commonFacts } from './insights-text.js';
+import { workDays } from './mework.js';
+import { profile, commonFacts } from './insights-text.js';
 import { planLabel, planTool, isRun, canonicalClient } from './agents.js';
 
 const CLIENT = `COALESCE(s.entrypoint, s.terminal_type, 'unknown')`;
@@ -63,7 +64,7 @@ export function parseFilters(q) {
 }
 
 export { TOOL_CATEGORY, CATEGORIES };
-const LANE_BUCKETS = 48;
+const laneStep = (span) => (span <= 26 * 36e5 ? 36e5 : span <= 8 * 864e5 ? 4 * 36e5 : 864e5);
 const TOK = `COALESCE(input_tokens,0) + COALESCE(output_tokens,0) + COALESCE(cache_read,0) + COALESCE(cache_creation,0)`;
 
 function tzOffset(fallbackMin) {
@@ -517,8 +518,16 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       return all(`SELECT ${day} AS day,
           SUM(CASE WHEN name = 'user_prompt' THEN n ELSE 0 END) prompts, SUM(CASE WHEN name = 'tool_result' THEN n ELSE 0 END) tools,
           SUM(CASE WHEN name = 'api_request' THEN tok END) tokens,
-          COUNT(DISTINCT CASE WHEN name IN ('user_prompt', 'api_request') THEN session_id END) sessions
+          COUNT(DISTINCT CASE WHEN name IN ('user_prompt', 'api_request') THEN session_id END) sessions,
+          ${CATEGORIES.map((c) => `SUM(CASE WHEN name = 'tool_result' AND ${TOOL_CATEGORY} = '${c}' THEN n ELSE 0 END) c_${c}`).join(', ')}
         FROM ${src.sql} GROUP BY 1 ORDER BY 1`, src.params);
+    },
+
+    async meWork(f, tzMin) {
+      const w = where(f, 'e');
+      const rows = await all(`SELECT e.ts, e.session_id, e.name, e.tool_name, ${J('e.attrs_json', 'cmd_kind')} cmd_kind, ${J('e.attrs_json', 'ext')} ext
+        FROM events e WHERE e.name IN ('user_prompt', 'api_request', 'tool_result') AND ${w.sql}`, w.params);
+      return workDays(rows, { tzMin });
     },
 
     async team(f, tzMin = 0, { single = false, parts = 'all', skip = [] } = {}) {
@@ -712,38 +721,7 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
 
       const sTool = source(f, { names: ['tool_result'], day: 'team.tools' });
       const mix$ = group(`SELECT e.user_key, ${TOOL_CATEGORY} cat, SUM(n) n FROM ${sTool.sql} GROUP BY 1, 2`, sTool.params);
-      const size = Math.max(60_000, Math.ceil((f.to - f.from) / LANE_BUCKETS));
-      const cuts = Array.from({ length: LANE_BUCKETS + 1 }, (_, k) => Math.floor(f.from) + k * size);
-      const laneSql = (src) => `SELECT e.user_key, CAST((ts - ${Math.floor(f.from)}) / ${size} AS BIGINT) b, ${add(`name = 'user_prompt'`)} p,
-          ${CATEGORIES.map((c) => `${add(`name = 'tool_result' AND ${TOOL_CATEGORY} = '${c}'`)} ${c}`).join(', ')},
-          ${add(`name = 'tool_result'`, 'fails')} + ${add(`name = 'api_error'`)} fail
-        FROM ${src.sql} GROUP BY 1, 2`;
-      const laneNames = ['user_prompt', 'tool_result', 'api_error'];
-      const lanes$ = (async () => {
-        const quick = fast('team.lanes') && size >= QUARTER && rollup() && f.members?.length && !f.client && !f.user && (!f.scope || f.scope.every((m) => m.all)) && await pqReady(S);
-        if (!quick) { const sLane = source(f, { names: laneNames, cuts, rawOnly: size < QUARTER }); return group(laneSql(sLane), sLane.params); }
-        const ed = source(f, { names: laneNames, cuts, edges: true });
-        if (!ed.A) return group(laneSql(ed), ed.params);
-        const since = new Map((f.scope || []).map((m) => [m.account_id, Number(m.since) || 0]));
-        const who = f.members.map(() => '(q.user_key = ? AND q.bucket >= ?)').join(' OR ');
-        const ranges = [[f.from, ed.A], ...ed.split.map((q) => [q, q + QUARTER]), [ed.B, f.to]].filter(([x, y]) => y > x);
-        const slim = ranges.map(() => `SELECT x.user_key, x.ts, x.name, x.tool_name, CASE WHEN x.success = 0 THEN 1 ELSE 0 END fails, 1 n FROM events x
-          WHERE x.name IN ('user_prompt', 'tool_result', 'api_error') AND x.user_key IN (${f.members.map(() => '?').join(', ')}) AND x.ts >= ? AND x.ts < ?
-            AND (${f.members.map(() => '(x.user_key = ? AND x.ts >= ?)').join(' OR ')}) AND NOT EXISTS (SELECT 1 FROM excluded_sessions xs WHERE xs.session_id = x.session_id)`).join(' UNION ALL ');
-        const slimParams = ranges.flatMap(([x, y]) => [...f.members, Math.floor(x), Math.ceil(y), ...f.members.flatMap((u) => [u, since.get(u) || 0])]);
-        const [a, b] = await Promise.all([all(laneSql({ sql: `(${slim}) e`, params: slimParams }), slimParams),
-          all(`SELECT q.user_key, CAST((q.bucket - ${Math.floor(f.from)}) / ${size} AS BIGINT) b, SUM(q.prompts) p, ${CATEGORIES.map((c) => `SUM(q.c_${c}) ${c}`).join(', ')},
-              SUM(q.tool_fails) + SUM(q.api_errors) fail FROM person_quarter q WHERE (${who}) AND q.bucket >= ? AND q.bucket < ?${ed.split.length ? ` AND q.bucket NOT IN (${ed.split.join(', ')})` : ''} GROUP BY 1, 2 HAVING SUM(q.prompts) + SUM(q.tools) + SUM(q.api_errors) > 0`,
-          [...f.members.flatMap((u) => [u, since.get(u) || 0]), ed.A, ed.B])]);
-        const m = new Map(), keys = ['p', ...CATEGORIES, 'fail'];
-        for (const r of [...a, ...b]) {
-          const k = `${r.user_key}|${r.b}`, o = m.get(k);
-          if (!o) { m.set(k, { user_key: r.user_key, b: Number(r.b), ...Object.fromEntries(keys.map((x) => [x, Number(r[x]) || 0])) }); continue; }
-          for (const x of keys) o[x] += Number(r[x]) || 0;
-        }
-        const out = new Map(); for (const r of m.values()) { if (!out.has(r.user_key)) out.set(r.user_key, []); out.get(r.user_key).push(r); }
-        return out;
-      })();
+      const size = laneStep(f.to - f.from);
       const wn = where({ ...f, from: clock() - 2 * 86400_000, to: clock() + 60_000 }, 'e');
       const everything = !f.scope || f.scope.every((m) => m.all);
       const latestRowOf = (names, cols) => (async () => {
@@ -859,8 +837,8 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
         for (const x of m.values()) x.rereadPerCall = x.mainCalls ? x.mainRead / x.mainCalls : 0;
         return m;
       })();
-      const [stat, prev, models, effort, clients, clientNow, effortNow, ctxRows, names, plugins, metrics, days, limits, mix, lanes, lastEv, lastTool, usual, toolStats, hooks, apiErr, asksBy, compactAuto, versions, promptTimes, fb, lastPrompt, runsBy, projectRows, [runsNow, runsPrev, actRows, prevRows], waits, , , , taskFacts, activeNow] = await Promise.all([
-        stat$, prev$, models$, effort$, clients$, clientNow$, effortNow$, ctxRows$, names$, plugins$, metrics$, days$, limits$, mix$, lanes$, lastEv$, lastTool$, usual$, toolStats$, hooks$, apiErr$, asksBy$, compactAuto$, versions$, promptTimes$, fb$, lastPrompt$, runsBy$, projectRows$, act$, waits$, plan$, ever$, stuck$, taskFacts$, active$]);
+      const [stat, prev, models, effort, clients, clientNow, effortNow, ctxRows, names, plugins, metrics, days, limits, mix, lastEv, lastTool, usual, toolStats, hooks, apiErr, asksBy, compactAuto, versions, promptTimes, fb, lastPrompt, runsBy, projectRows, [runsNow, runsPrev, actRows, prevRows], waits, , , , taskFacts, activeNow] = await Promise.all([
+        stat$, prev$, models$, effort$, clients$, clientNow$, effortNow$, ctxRows$, names$, plugins$, metrics$, days$, limits$, mix$, lastEv$, lastTool$, usual$, toolStats$, hooks$, apiErr$, asksBy$, compactAuto$, versions$, promptTimes$, fb$, lastPrompt$, runsBy$, projectRows$, act$, waits$, plan$, ever$, stuck$, taskFacts$, active$]);
       const rereads = [...taskFacts.values()].filter((x) => x.mainCalls >= 50).map((x) => x.rereadPerCall).sort((a, b) => a - b);
       const teamTool = new Map();
       for (const rows of toolStats.values()) for (const r of rows) { const t = teamTool.get(r.tool) || { calls: 0, fails: 0 }; t.calls += r.calls; t.fails += r.fails; teamTool.set(r.tool, t); }
@@ -912,11 +890,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
           five_pct: planOf(u.user_key)?.five_pct ?? limits.get(u.user_key)?.five_pct ?? null,
           week_pct: planOf(u.user_key)?.week_pct ?? limits.get(u.user_key)?.week_pct ?? null,
           mix: Object.fromEntries(CATEGORIES.map((c) => [c, (mix.get(u.user_key) || []).find((r) => r.cat === c)?.n || 0])),
-          lane: (() => {
-            const a = Array.from({ length: Math.ceil((f.to - f.from) / size) }, () => null);
-            for (const r of lanes.get(u.user_key) || []) if (r.b >= 0 && r.b < a.length) a[r.b] = [r.p, ...CATEGORIES.map((c) => r[c]), r.fail];
-            return a;
-          })(),
           now: {
             lastTs: lastEv.get(u.user_key)?.ts ?? null, last: lastEv.get(u.user_key)?.name ?? null,
             toolTs: lastTool.get(u.user_key)?.ts ?? null, doing: lastTool.get(u.user_key)?.cat ?? null, tool: lastTool.get(u.user_key)?.tool_name ?? null,
@@ -994,7 +967,6 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const prevMinutes = (runsPrev ? [...runsPrev.values()].map(unionRuns) : [...prevRows.values()].map((rows) => activeSegments(rows)))
         .reduce((a, segs) => a + segs.reduce((x, [p, q]) => x + (q - p) / 60_000, 0), 0);
       return {
-        summary: teamSummary(people, { prevMinutes: prevMinutes >= 1 ? Math.round(prevMinutes) : null }),
         projects, recent,
         ...(core ? {} : {
           codeLines: await this.codeLines(f, tzMin, projectOf(projectRows)),

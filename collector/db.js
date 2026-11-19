@@ -166,7 +166,7 @@ function migrate(db) {
 
 export function openDb(file, { rollup = false } = {}) {
   const db = new DatabaseSync(file);
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+  db.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
   db.exec(schema('sqlite').replace(/,\s*name TEXT, country TEXT, timezone TEXT/, '').replace(/,\s*source TEXT NOT NULL DEFAULT 'otel', agent TEXT NOT NULL DEFAULT 'claude-code'/, ''));
   migrate(db);
   db.exec('PRAGMA optimize=0x10002');
@@ -181,7 +181,7 @@ export function openDb(file, { rollup = false } = {}) {
     if (session?.session_id) p.upSession.run(...sessionArgs(identity, session, ts));
   }
   function tx(fn) {
-    db.exec('BEGIN');
+    db.exec('BEGIN IMMEDIATE');
     try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
 

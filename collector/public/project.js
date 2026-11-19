@@ -2,7 +2,7 @@ const q = new URLSearchParams(location.search), team = q.get('team'), demo = q.g
 const RANGES = { '1d': ['1D', 1], '7d': ['7D', 7], '30d': ['30D', 30], '90d': ['90D', 90] };
 const PER = 25;
 let range = RANGES[q.get('range')] ? q.get('range') : '7d', data = null, sel = q.get('c') || null, cpage = 0;
-let win = { from: Date.now() - 7 * 864e5, to: Date.now() };
+let win = PuddleWhen.window(7);
 const el = document.getElementById('prj');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const usd = (v) => { const x = Number(v) || 0; return `$${x < 10 ? x.toFixed(2) : Math.round(x).toLocaleString()}`; };
@@ -29,10 +29,9 @@ const tip = Object.assign(document.createElement('div'), { className: 'tip' }); 
 const showTip = (e, html) => { tip.innerHTML = html; tip.hidden = false; const r = tip.getBoundingClientRect(); tip.style.left = `${Math.min(innerWidth - r.width - 8, e.clientX + 14)}px`; tip.style.top = `${Math.min(innerHeight - r.height - 8, e.clientY + 14)}px`; };
 const hideTip = () => { tip.hidden = true; };
 
-const SLOT_SIZES = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].map((m) => m * 60_000);
-function slotsOf(prompts, from, to, width) {
-  const span = to - from, size = SLOT_SIZES.find((z) => width / (span / z) >= 10) || SLOT_SIZES.at(-1), n = Math.max(1, Math.round(span / size));
-  const step = span / n, slots = Array.from({ length: n }, (_, i) => ({ from: from + i * step, to: i === n - 1 ? to : from + (i + 1) * step, cost: 0, ctx: null, calls: 0, prompts: 0, by: new Map() }));
+function slotsOf(prompts, from, to) {
+  const step = PuddleWhen.step(to - from), n = Math.max(1, Math.ceil((to - from) / step));
+  const slots = Array.from({ length: n }, (_, i) => ({ from: from + i * step, to: i === n - 1 ? to : from + (i + 1) * step, cost: 0, ctx: null, calls: 0, prompts: 0, by: new Map() }));
   for (const p of prompts) {
     if (p.t < from || p.t > to) continue;
     const sl = slots[Math.min(n - 1, Math.floor((p.t - from) / step))];
@@ -44,7 +43,7 @@ function slotsOf(prompts, from, to, width) {
 let shown = [];
 function unfold(prompts) {
   const W = 1000, H = 240, top = 10, bottom = 4, ph = H - top - bottom, { from, to } = win, span = to - from;
-  const slots = shown = slotsOf(prompts, from, to, el.clientWidth || 1000), n = slots.length, sw = W / n, bw = Math.max(1, sw * 0.72);
+  const slots = shown = slotsOf(prompts, from, to), n = slots.length, sw = W / n, bw = Math.max(1, sw * 0.72);
   const x = (t) => ((t - from) / span) * W;
   const maxC = Math.max(0.01, ...slots.map((sl) => sl.cost)), maxX = Math.max(1, ...slots.map((sl) => sl.ctx || 0));
   const total = slots.reduce((a, sl) => a + sl.cost, 0) || 1;
@@ -65,7 +64,7 @@ function unfold(prompts) {
     ${lines.map((t) => `<line x1="${x(t).toFixed(1)}" x2="${x(t).toFixed(1)}" y1="${top}" y2="${top + ph}" class="prj-grid"/>`).join('')}
     <path d="${area}" class="prj-cum"/>${cols}
     ${slots.map((sl, i) => `<rect data-i="${i}" x="${(i * sw).toFixed(1)}" y="${top}" width="${sw.toFixed(1)}" height="${ph}" fill="transparent" class="prj-hit"/>`).join('')}
-  </svg><div class="prj-days"><span style="left:0">${esc(when(from))}</span>${named.map((m) => `<span style="left:${(m.at * 100).toFixed(2)}%">${new Date(m.t).toLocaleDateString([], span > 14 * 864e5 ? { day: 'numeric', month: 'short' } : { weekday: 'short', day: 'numeric' })}</span>`).join('')}<span style="right:0">now</span></div></div>`;
+  </svg><div class="prj-days"><span style="left:0">${esc(span <= 26 * 36e5 ? when(from, false) : new Date(from).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }))}</span>${named.map((m) => `<span style="left:${(m.at * 100).toFixed(2)}%">${new Date(m.t).toLocaleDateString([], span > 14 * 864e5 ? { day: 'numeric', month: 'short' } : { weekday: 'short', day: 'numeric' })}</span>`).join('')}<span style="right:0">now</span></div></div>`;
 }
 
 function draw() {
@@ -129,7 +128,7 @@ function remember() {
 }
 
 async function load() {
-  const days = RANGES[range][1], to = Date.now() + 60_000, from = Date.now() - days * 864e5;
+  const { from, to } = PuddleWhen.window(RANGES[range][1]);
   win = { from, to: Date.now() };
   const qs = new URLSearchParams({ from, to, tz: -new Date().getTimezoneOffset(), p: name, ...(team ? { team } : {}), ...(demo ? { demo: '1' } : {}) });
   const r = await fetch(`/api/project?${qs}`).catch(() => null);

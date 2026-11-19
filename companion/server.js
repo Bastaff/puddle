@@ -11,7 +11,7 @@ import { startPersonal } from './personal.js';
 import { makeCloud, serviceUrl } from './cloud.js';
 import { makeUpdater, currentVersion, currentBuilt } from './update.js';
 import { makeErrors, setupReport, statusLineIsPuddle } from './report.js';
-import { makeCost } from './cost.js';
+import { makeCost, noteStop } from './cost.js';
 import { makeTitles } from './titles.js';
 import { startMirror } from './mirror.js';
 import { makePlan } from './plan.js';
@@ -72,7 +72,7 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
     site: { update: () => updater.state, install: () => updater.install(), check: () => updater.check(), work: (from) => workFromScan(getScan(), from), plan: () => labelPlans(plan.latest(), getScan()),
       mac: () => ({ connected: cloud.connected(), email: cloud.email(), website: Boolean(serviceUrl(env)), version: currentVersion(), accounts: (getScan().accounts || []).filter((a) => Object.keys(a.surfaces || {}).length)
         .map(({ tool, kind, org, plan }) => ({ tool, kind, org, plan })) }),
-      projectOf: () => { const m = new Map((getScan().sessions || []).map((x) => [x.id, x.repo || x.folder || null])); return (sid) => m.get(sid) || null; }, nav: () => cloud.nav(), link: (next) => cloud.dashboardLink(next), signOut: async () => { await cloud.signOut(); fs.rmSync(choicesFile, { force: true }); } } });
+      projects: () => Object.fromEntries((getScan().sessions || []).filter((x) => x.id && (x.repo || x.folder)).map((x) => [x.id, x.repo || x.folder])), nav: () => cloud.nav(), link: (next) => cloud.dashboardLink(next), signOut: async () => { await cloud.signOut(); fs.rmSync(choicesFile, { force: true }); } } });
   let cached = null, scanning = null;
   const EMPTY = { days: 90, scannedAt: 0, tools: [], plans: [], accounts: [], places: [], sessions: [], daily: [], totals: { sessions: 0, prompts: 0, minutes: 0, activeDays: 0 }, blindSpots: [] };
   const scanner = scanThread({ home, env, log });
@@ -272,6 +272,7 @@ export function startCompanion({ port = 4600, home = os.homedir(), env = process
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try { os.setPriority(10); } catch {}
+  process.on('uncaughtException', (e) => { noteStop(dataDir(os.homedir(), process.env), e); console.error(e); process.exit(1); });
   startCompanion({ port: Number(process.env.PORT) || 4600 });
   if (process.env.PUDDLE_LOOP_STATS) {
     const { monitorEventLoopDelay } = await import('node:perf_hooks');

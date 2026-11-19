@@ -202,6 +202,51 @@ export function sqliteRollup(db, S) {
   };
 }
 
+const MARK = (row) => `INSERT INTO rollup_dirty (session_id, user_key, bucket) SELECT s, u, b FROM (SELECT ${row}.session_id s, CASE WHEN ${row}.session_id IS NULL THEN ${row}.user_key END u, CAST(${row}.ts AS INTEGER) - CAST(${row}.ts AS INTEGER) % ${QUARTER} b) x
+  WHERE NOT EXISTS (SELECT 1 FROM rollup_dirty d WHERE COALESCE(d.session_id, '') = COALESCE(x.s, '') AND COALESCE(d.user_key, '') = COALESCE(x.u, '') AND d.bucket = x.b)`;
+const TRIGGERS = [
+  ['rollup_dirty_ins2', `AFTER INSERT ON events BEGIN ${MARK('NEW')}; END`],
+  ['rollup_dirty_del2', `AFTER DELETE ON events BEGIN ${MARK('OLD')}; END`],
+  ['rollup_dirty_upd2', `AFTER UPDATE ON events BEGIN ${MARK('OLD')}; ${MARK('NEW')}; END`],
+];
+
+export function trackedRollup(db, S, { step = 100, budgetMs = 2000, pauseMs = 25, slowMs = 500, log = () => {} } = {}) {
+  const R = sqliteRollup(db, S);
+  db.exec(`CREATE TABLE IF NOT EXISTS rollup_dirty (session_id TEXT, user_key TEXT, bucket BIGINT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS rollup_dirty_key ON rollup_dirty (COALESCE(session_id, ''), COALESCE(user_key, ''), bucket);`);
+  const tx = (fn) => { db.exec('BEGIN IMMEDIATE'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
+  const triggers = () => db.prepare(`SELECT COUNT(*) n FROM sqlite_master WHERE type = 'trigger' AND name IN (${TRIGGERS.map(() => '?').join(', ')})`).get(...TRIGGERS.map(([n]) => n)).n === TRIGGERS.length;
+  const waiting = db.prepare(`SELECT COUNT(*) n FROM rollup_dirty`), next = db.prepare(`SELECT rowid id, session_id, user_key, bucket FROM rollup_dirty ORDER BY rowid LIMIT ?`), done = db.prepare(`DELETE FROM rollup_dirty WHERE rowid <= ?`);
+  const start = () => tx(() => {
+    for (const old of ['rollup_dirty_ins', 'rollup_dirty_del', 'rollup_dirty_upd']) db.exec(`DROP TRIGGER IF EXISTS ${old}`);
+    for (const [name, body] of TRIGGERS) db.exec(`CREATE TRIGGER IF NOT EXISTS ${name} ${body}`);
+    for (const t of ['rollup_dirty', 'event_rollup', 'active_run', 'prompt_rollup', 'task_rollup']) db.exec(`DELETE FROM ${t}`);
+    db.exec(`INSERT OR IGNORE INTO rollup_dirty (session_id, user_key, bucket) SELECT DISTINCT session_id, CASE WHEN session_id IS NULL THEN user_key END, CAST(ts AS INTEGER) - CAST(ts AS INTEGER) % ${QUARTER} FROM events`);
+    db.prepare(`INSERT INTO rollup_state (k, v) VALUES ('version', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`).run(String(ROLLUP_VERSION));
+  });
+  return {
+    async sync({ budgetMs: budget = budgetMs, most = Infinity } = {}) {
+      const began = Date.now();
+      if (R.version() !== ROLLUP_VERSION || !triggers()) { const t0 = Date.now(); start(); log(`summary tables started in ${Date.now() - t0} ms`); }
+      if (Number(waiting.get().n) > most) return false;
+      for (let i = 0; i === 0 || Date.now() - began < budget; i++) {
+        if (i) await new Promise((r) => setTimeout(r, pauseMs));
+        const t0 = Date.now();
+        const more = tx(() => {
+          const rows = next.all(step);
+          if (!rows.length) return false;
+          R.refresh(rows.map((r) => ({ session_id: r.session_id, user_key: r.user_key, bucket: Number(r.bucket) })));
+          done.run(rows.at(-1).id);
+          return rows.length === step;
+        });
+        if (Date.now() - t0 > slowMs) log(`summary step held the database ${Date.now() - t0} ms`);
+        if (!more) break;
+      }
+      return Number(waiting.get().n) === 0;
+    },
+  };
+}
+
 export const ACTIVE_NAMES = ['user_prompt', 'api_request', 'tool_result'];
 export const RUN_GAP = 5 * 60_000;
 function insertRuns(S, cond) {

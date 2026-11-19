@@ -1,17 +1,11 @@
 (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const MIN = 60_000, HOUR = 36e5;
-  const WINDOWS = { '15m': ['15 min', 15 * MIN, 5 * MIN, 'the last 15 minutes'], '1h': ['1 h', HOUR, 15 * MIN, 'the last hour'],
-    '6h': ['6 h', 6 * HOUR, HOUR, 'the last 6 hours'], '24h': ['24 h', 24 * HOUR, 6 * HOUR, 'the last 24 hours'] };
-  const SIZES = [MIN, 2 * MIN, 5 * MIN, 10 * MIN, 15 * MIN, 30 * MIN, HOUR];
-  const slotsFor = (span, width) => (span <= 15 * MIN ? span / MIN : span / (SIZES.find((z) => (width / (span / z)) >= 14) || HOUR));
-  const slotName = (sl) => {
-    if (sl.to - sl.from > MIN + 1) return `${clock(sl.from)}–${clock(sl.to)}`;
-    const ago = Math.round((Date.now() - sl.to) / MIN);
-    return ago <= 0 ? 'The last minute' : `${ago} min ago`;
-  };
-  globalThis.promptSlots = (prompts, to, span, n) => {
-    const size = span / n, from = to - span;
+  const WINDOWS = { '15m': ['15 min', 15 * MIN, 5 * MIN, 'the last 15 minutes', MIN], '1h': ['1 h', HOUR, 15 * MIN, 'the last hour', 5 * MIN],
+    '6h': ['6 h', 6 * HOUR, HOUR, 'the last 6 hours', 15 * MIN], '24h': ['24 h', 24 * HOUR, 6 * HOUR, 'the last 24 hours', HOUR] };
+  const slotName = (sl) => (sl.to - sl.from > MIN + 1 ? `${clock(sl.from)}–${clock(sl.to)}` : clock(sl.from));
+  globalThis.promptSlots = (prompts, now, span, n) => {
+    const size = span / n, off = -new Date(now).getTimezoneOffset() * MIN, to = Math.ceil((now + 1 + off) / size) * size - off, from = to - span;
     const slots = Array.from({ length: n }, (_, i) => ({ from: from + i * size, to: i === n - 1 ? to : from + (i + 1) * size, prompts: [], tokens: 0, output: 0, context: null }));
     for (const q of prompts) {
       if (q.ts < from || q.ts > to) continue;
@@ -26,12 +20,12 @@
   const tok = (n) => globalThis.calTok?.(n) ?? String(n);
   const pad2 = (n) => String(n).padStart(2, '0');
   const clock = (t) => { const d = new Date(t); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
-  const H = 100, GAP = 30, C = 44;
+  const GAP = 30, C = 44, TALL = 208;
   const mounted = new Set();
 
   function draw(card) {
     const { ld, opt } = card._prompts, [, span, step, words] = WINDOWS[win];
-    const n = slotsFor(span, card._prompts.w || card.clientWidth - 40 || 600);
+    const n = span / WINDOWS[win][4];
     const { from, to, slots } = globalThis.promptSlots(ld?.prompts || [], Date.now(), span, n);
     const list = slots.flatMap((sl) => sl.prompts), sum = list.reduce((a, q) => a + q.tokens, 0);
     const seg = Object.entries(WINDOWS).map(([k, [l]]) => `<button type="button" data-w="${k}" aria-pressed="${k === win}">${l}</button>`).join('');
@@ -48,8 +42,9 @@
     };
     const el = card.querySelector('.you-day.pr-chart');
     if (!el) return;
-    const W = Math.max(260, Math.round(el.clientWidth || 600));
+    const W = Math.max(260, Math.round(el.clientWidth || 600)), T = Math.max(TALL, Math.round(el.clientHeight || TALL)), H = T - (TALL - 100);
     if (Math.abs(W - (card._prompts.w || 0)) > 8) { card._prompts.w = W; return draw(card); }
+    card._prompts.h = T;
     const x = (t) => ((t - from) / span) * W, sw = W / n, gap = Math.max(2, Math.min(6, sw * 0.3)), bw = sw - gap;
     const max = Math.max(1, ...slots.map((sl) => sl.tokens)), y = (v) => H - (v / max) * H;
     const cy0 = H + GAP, cy = (v) => cy0 + C - (v / 100) * C, r = Math.min(3, bw / 2);
@@ -81,14 +76,14 @@
     }).join('');
     const off = -new Date().getTimezoneOffset() * MIN, ticks = [];
     for (let t = Math.ceil((from + off) / step) * step - off; t < to - span * 0.08; t += step) ticks.push(`<text x="${x(t)}" y="${cy0 + C + 16}" class="tick" text-anchor="middle">${clock(t)}</text>`);
-    el.innerHTML = `<svg viewBox="0 -16 ${W} ${cy0 + C + 34}" role="img" aria-label="Prompts in ${words}, in ${n} slots: the tokens they took, and how full the conversation got">
+    el.innerHTML = `<svg viewBox="0 -16 ${W} ${T}" role="img" aria-label="Prompts in ${words}, in ${n} slots: the tokens they took, and how full the conversation got">
       <text x="0" y="-5" class="tick lab">Tokens${list.length ? ` · up to ${tok(max)}` : ''}</text>
       ${list.length ? '' : `<text x="${W / 2}" y="${H / 2 + 4}" class="tick" text-anchor="middle">No prompts in ${words}</text>`}
       <line x1="0" x2="${W}" y1="${H}" y2="${H}" class="base"/>
       <text x="0" y="${cy0 - 7}" class="tick lab">Context · how full the conversation got</text>
       <line x1="0" x2="${W}" y1="${cy(90)}" y2="${cy(90)}" class="ctx-90"/><text x="${W}" y="${cy0 - 7}" class="tick" text-anchor="end">dashed: 90%</text>
       <line x1="0" x2="${W}" y1="${cy0 + C}" y2="${cy0 + C}" class="base"/>${bars}${ticks.join('')}
-      <text x="${W}" y="${cy0 + C + 16}" class="tick" text-anchor="end">now</text></svg>`;
+      <text x="${W}" y="${cy0 + C + 16}" class="tick" text-anchor="end">${clock(to)}</text></svg>`;
     opt.hover?.(el, (e) => {
       const b = el.getBoundingClientRect(), sl = slots[Math.floor(((e.clientX - b.left) / b.width) * n)];
       if (!sl) return '';
@@ -113,7 +108,7 @@
     draw(card);
   };
   const sized = 'ResizeObserver' in globalThis ? new ResizeObserver((es) => {
-    for (const e of es) { const c = e.target, w = c.querySelector('.pr-chart')?.clientWidth; if (c._prompts?.w && w && Math.abs(w - c._prompts.w) > 8) draw(c); }
+    for (const e of es) { const c = e.target, el = c.querySelector('.you-day.pr-chart'), vb = el?.querySelector('svg')?.viewBox.baseVal; if (c._prompts && vb?.width && (Math.abs(Math.max(260, el.clientWidth) - vb.width) > 8 || Math.abs(Math.max(TALL, el.clientHeight) - vb.height) > 8)) { c._prompts.w = 0; draw(c); } }
   }) : null;
   setInterval(() => {
     if ((win !== '15m' && win !== '1h') || document.body.classList.contains('arranging')) return;

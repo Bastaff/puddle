@@ -44,7 +44,8 @@ Everyone keeps their prompts and code to themselves. The team sees the work, nev
 
 ## You, day by day
 
-Today against a usual day, three months of agent work at a glance, and the code it moved, project by project.
+Today against a usual day, how much of the time your agents worked rather than waited on you, what you built (web, iOS
+app or code, and in which languages), and the code it shipped.
 
 <p align="center">
   <img src="assets/readme/today.png" width="280" align="top" alt="Today: 4:14 h with agents, a little under a usual day by now, with an hour-by-hour chart">
@@ -52,7 +53,7 @@ Today against a usual day, three months of agent work at a glance, and the code 
   <img src="assets/readme/code-changes.png" width="280" align="top" alt="Code changes per project over two weeks: lines added and removed">
 </p>
 
-Keep it to yourself, or share a live page with the cards you pick. It sits nicely next to a CV or a portfolio: yes,
+Keep it to yourself, or share a live page of your records: agent hours, streak, lines shipped, your biggest prompt. It sits nicely next to a CV or a portfolio: yes,
 you really do have the experience.
 
 <sub>The pictures show Puddle's demo: made-up people and projects.</sub>
@@ -83,11 +84,14 @@ files (backed up first). Signing out puts them back. Exactly what is written whe
 
 ## What you see
 
-- **Today and this week:** time with agents, against a usual day.
-- **What the agents worked on:** running commands, editing and reading code, web research, sub-agents,
-  connected tools, planning.
-- **How it went:** prompts that ran smoothly, ones you had to take over, conversations that ran out of room.
-- **Your rhythm:** the last three months day by day, the hours you work, how much falls outside working hours.
+- **Today:** time with agents, hour by hour, against a usual day.
+- **You and the agent:** each day split into the time agents worked and the time they waited on you.
+- **What you built:** web, iOS app or code, with the checks, builds and edits behind each, and the languages edited.
+- **Shipped:** lines of code added, with commits, pushes and deploys.
+- **Days, Leverage, Your week, Hands-off:** which days you worked, how many agent steps each prompt bought, when you
+  usually work, and how much ran without asking you. All for the last 7, 30 or 90 days (7 when you
+  open it). You place each card where you want it and pull its corner to
+  resize it.
 - **Plan limits:** how close you are to your Claude and Codex limits, and when they reset.
 - **Your team:** who is working now, on which project, what needs a look, and everyone's limits.
 
@@ -97,7 +101,8 @@ files (backed up first). Signing out puts them back. Exactly what is written whe
 Seconds. Puddle finds Claude Code and Codex on its own and reads the history they already keep.
 
 **Can I show it off?**
-Yes. Share a live page with the cards you pick, and anyone with the link sees your work as it happens.
+Yes. Share a live page of your records from the last 30 days, with the parts you pick. Anyone with the link sees it
+update as you work.
 
 **How does it work for a team?**
 Create a team and invite people with a link. Everyone sees who is working now, on which project, what the agents are

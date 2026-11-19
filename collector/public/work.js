@@ -69,7 +69,7 @@ function draw() {
 let asking = null;
 async function load() {
   remember();
-  const days = RANGES[range][1], to = Date.now() + 60_000, from = Date.now() - days * 864e5;
+  const { from, to } = PuddleWhen.window(RANGES[range][1]);
   const qs = new URLSearchParams({ from, to, tz: -new Date().getTimezoneOffset(), page, ...(sort !== 'recent' ? { sort } : {}), ...(person ? { person } : {}), ...(project ? { project } : {}), ...(team ? { team } : {}), ...(demo ? { demo: '1' } : {}) });
   asking?.abort();
   const mine = asking = new AbortController();

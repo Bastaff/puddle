@@ -6,11 +6,11 @@ import path from 'node:path';
 import { startPersonal } from '../companion/personal.js';
 import { freePort } from './port.js';
 
-test('offline: Me keeps the teams it knew, and /go comes back to Me at once', async () => {
+test('offline: Me keeps the teams it knew, and /go comes back to Me at once; a slow website is not called offline', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'puddle-offline-'));
   const port = await freePort();
   let down = false, slow = false;
-  const net = (data) => (down ? Promise.reject(new TypeError('fetch failed')) : slow ? new Promise(() => {}) : Promise.resolve({ status: 200, data }));
+  const net = (data) => (down ? Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } })) : slow ? new Promise(() => {}) : Promise.resolve({ status: 200, data }));
   const site = { mac: () => ({ connected: true }), nav: () => net({ teams: [{ id: 't1', name: 'Acme', canView: true }] }), link: (next) => net({ url: 'https://puddle.example/auth?next=' + encodeURIComponent(next) }) };
   const p = startPersonal({ home, port, site });
   await new Promise((r) => setTimeout(r, 200));
@@ -27,7 +27,11 @@ test('offline: Me keeps the teams it knew, and /go comes back to Me at once', as
     assert.equal(go.headers.get('location'), '/?offline=1', 'back to Me, which says why');
     down = false; slow = true;
     const t0 = Date.now(), hung = await fetch(`${base}/go?to=${encodeURIComponent('/settings')}`, { redirect: 'manual' });
-    assert.equal(hung.headers.get('location'), '/?offline=1');
+    assert.equal(hung.headers.get('location'), '/?slow=1', 'a website that doesn\'t answer is slow, not offline');
     assert.ok(Date.now() - t0 < 10_000, `${Date.now() - t0} ms`);
+    const late = await (await fetch(`${base}/api/site-nav`)).json();
+    assert.equal(late.slow, true);
+    assert.ok(!late.offline, 'the page never says "No internet" because the website is slow');
+    assert.deepEqual(late.teams.map((t) => t.name), ['Acme'], 'the last list it had');
   } finally { p.close(); fs.rmSync(home, { recursive: true, force: true }); }
 });

@@ -3,18 +3,15 @@
 const LEARN = (() => {
   const T = {
     'pv:state': 'What this person\'s agent is doing right now: the kind of step it is taking, thinking between steps, idle (a few minutes quiet) or away.',
-    'pv:range': 'The time window the work and Task size cover: today since midnight, or the last 7 or 30 days.',
-    'pv:work': 'Every step the agent took, grouped by what it was for. Running commands = the terminal, Editing code = changing files, Connected tools = MCP connectors such as a browser or Slack.',
-    'pv:tools': 'The individual tools the agent used most. Red = the share of calls that failed.',
-    'pv:plan': 'How much of your subscription is used and left: the 5-hour window and the week, per account. From the Claude app\'s own record (and Codex). A window that has reset counts as 0.',
-    'pv:lines': 'Lines of code your agents added and removed, per project (counts only, never the code). Each line is a project\'s running total, so you see it grow or shrink.',
-    'pv:size': 'How full your conversations get: the share of what the model can hold, at the largest point of each conversation. Near full, the agent forgets early parts or has to squeeze the conversation; a fresh one per task helps.',
-    'pv:projects': 'The latest conversations, by the title Claude Code gave them, with their project (its git repository, or the folder when there is none), how long each was worked on and when. Open one to see how it spent its tokens; "See all" lists every one.',
+    'cr:today': 'Your agent time today, hour by hour (orange), over your usual day (grey: the average of active days in the last 8 weeks). The line is now.',
+    'cr:agent': 'Each day split into the time an agent was working and the time it sat waiting for your next prompt (gaps under 3 hours). Several agents at once count once per hour.',
+    'cr:built': 'The kind of work your sessions were: an iOS app when the Simulator or Xcode was used, Web when a browser was, Code otherwise. Languages come from the file types edited, counted on this Mac only.',
+    'cr:squares': 'One square per day. Bigger squares are busier days, coloured by the kind of work. The ringed square is today.',
+    'cr:shipped': 'Lines of code your agents added, as a running total. Commits, pushes and deploys are counted from the commands they ran, on this Mac only (never the commands themselves).',
+    'cr:leverage': 'How many steps an agent took for each prompt you wrote, per day. Higher means more work per instruction. Days with fewer than 3 prompts are left out.',
+    'cr:week': 'When you usually work. Small and wide, your usual day hour by hour, with the busiest hours orange. Large, the whole week in three-hour blocks: darker is busier and the ringed block is now.',
+    'cr:handsoff': 'The share of agent actions that ran without asking you, and how big your requests were: questions (no tools), short tasks, or long runs of 20+ steps.',
     'pv:flags': 'Things worth a look, found by fixed rules: a tool or connector that keeps failing, rate limits, being stuck retrying, an old Claude Code, or having stopped. Nothing here means nothing unusual.',
-    'pv:hands': 'Task size: how big the tasks are that get handed over: questions (no tools), short tasks, or long tasks of 20+ steps without stepping in.',
-    'pv:prompts': 'Your prompts in the window you pick (15 minutes to 24 hours), in time slots: above, the tokens each slot\'s prompts took (re-reading the conversation counts too); below, how full the fullest conversation among them got (red from 90%, the dashed line). Hover a slot for its numbers.',
-    'pv:day': 'Today hour by hour (orange) over the typical day (grey: the average of active days in the last 8 weeks). The dashed line is now.',
-    'pv:rhythm': 'Tokens used each day. Beige is a day without agent work; the deeper the blue, the more tokens. Days in the chosen range are full colour, earlier ones faded. Hover a day for its numbers.',
     'bar:range': 'The time window everything on the page covers. 1D = today since midnight, 7D/30D/90D = the last 7, 30 or 90 days. Changes like ▲12% compare with the window just before it.',
     'bar:arrange': 'Arrange the page your way: the cards jiggle; drag one anywhere, pick its size (S, M, L or Full), or tap the eye to hide it. Hidden cards wait in the tray under this button (the number on it) and aren’t loaded until you bring one back: tap it, or drag it where you want it. Kept with your account.',
     'bar:health': 'Whether what you see is current. Live: it updates by itself. Connecting: the live connection is reopening. No internet, Busy or Reconnecting: you\u2019re looking at what was here at the time it says, and it catches up by itself. On a team\u2019s page a click shows the details.',
@@ -23,12 +20,10 @@ const LEARN = (() => {
     'bar:learn': 'Learn mode: hover anything for an explanation like this one. Turn it off when you know your way around.',
     'bar:demo': 'You are looking at a made-up team so you can see how the dashboard behaves with many people. Your real data is untouched. Click to go back.',
 
-    'card:summary': 'The period in plain sentences, written from fixed rules over the numbers (no AI guessing). Hover a sentence to see the numbers behind it. Click a person to see their own profile here.',
     'card:prompts': 'The team\'s prompts in the window you pick (15 minutes to 24 hours), in time slots: above, the tokens each slot took, split by person in the colour of their dot in the table; below, how full the fullest conversation got (red from 90%, the dashed line). Hover a slot for who used how much.',
     'card:lines': 'Lines of code added and removed, per project, from the agents\' own records (counts only, never the code). Each line is a project\'s running total (added minus removed), so you see which projects grow and which shrink.',
     'card:projects': 'Active Projects: each person\'s latest conversation, newest first: its title, the project (its git repository, or the folder when there is none), how long it was worked on, and when. Open one to see how it spent its tokens; "See all" lists every conversation, a page at a time.',
     'card:team': 'Everyone on the team, one row each. Read it left to right: what they are doing right now, when they worked, what kind of work, how much, how independently Claude works for them, and how often things fail.',
-    'card:timeline': 'Tokens used over time. A token is a small piece of text (roughly ¾ of a word) that Claude reads or writes; it is the unit usage is measured in. Tall bars = busy moments. The line below adds them up. Drag across the chart to zoom in.',
     'card:features': 'Which Claude Code features the team actually uses. The bar shows the share of active people who used it; the faces show who. Useful to spot features nobody has discovered yet.',
     'card:issues': 'Things worth a look, worked out automatically from the data. They are facts, not judgements: someone may simply be on holiday. Click one to focus that person.',
     'card:map': 'Where the team is, based on each person’s time zone (the pin sits on that time zone’s city, not their exact location). A pulsing ring means they are working right now.',
@@ -158,7 +153,7 @@ const LEARN = (() => {
     }
     return `<b>${esc(n)}</b> is a tool Claude used. Tools are the actions Claude can take, like reading a file or running a command.`;
   }
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   let on = false;
   try { on = localStorage.getItem('cu-learn') === '1'; } catch {}

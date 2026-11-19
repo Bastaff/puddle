@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import { profile, teamSummary, commonFacts, listNames } from '../collector/insights-text.js';
+import { profile, commonFacts } from '../collector/insights-text.js';
 import { makeDemo } from '../collector/demo.js';
 
 const person = (o = {}) => ({
@@ -29,19 +29,8 @@ test('a trait most of the team shares is said once for the team, not on every li
   const common = commonFacts(people);
   assert.ok(common.has('autoapprove'));
   assert.doesNotMatch(profile(people[0], { common }).line, /auto-approved/);
-  const sentences = teamSummary(people).map((s) => s.text);
-  assert.ok(sentences.some((s) => /^Everyone let the agent act without stepping in/.test(s)));
-  assert.equal(listNames(['Yuki', 'Noah', 'Priya']), 'Yuki, Noah and Priya');
 });
 
-test('the team summary never ranks people and only names them to act on something', () => {
-  const people = [person({ name: 'Ann' }), person({ name: 'Ben', prompts: 0, runs: { prompts: 0, long: 0, chat: 0, smooth: 0, longest: 0 }, flags: [{ kind: 'quiet', level: 'warn', text: 'No prompts for 6 days' }] })];
-  const text = teamSummary(people, { prevMinutes: 400 }).map((s) => s.text).join(' ');
-  assert.match(text, /1 of 2 people used agents in this period; Ben stopped\./);
-  assert.match(text, /up from 6\.7 h/);
-  assert.doesNotMatch(text, /\b(best|worst|top|most productive|least|rank)/i);
-  assert.doesNotMatch(text, /github|\.com\//, 'no project names in sentences');
-});
 
 test('demo personas come out as the people they were written to be', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cu-insights-'));
@@ -55,7 +44,6 @@ test('demo personas come out as the people they were written to be', async () =>
     assert.match(line['Jonas Weber'], /failed steps|stuck|failing/);
     assert.match(line['Tom Becker'], /approves step by step/);
     assert.doesNotMatch(line['Lena Fischer'], /fail|stuck|stopped|limit/, 'steady person: nothing alarming');
-    assert.ok(t.summary.length >= 3 && t.summary.every((s) => s.text && s.evidence != null));
     assert.ok(t.headline.activeMinutes > 0 && t.headline.runPrompts > 0);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

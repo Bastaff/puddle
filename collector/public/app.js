@@ -3,11 +3,11 @@
 const $ = (s) => document.querySelector(s);
 const SOLO = document.body.classList.contains('personal');
 const HOUR = 3600_000, DAY = 24 * HOUR;
-const state = { range: '7d', tab: 'live' };
+const state = { range: '7d' };
 try { Object.assign(state, JSON.parse(localStorage.getItem('cu2') || '{}')); } catch {}
 if (state.range === 'today') state.range = '1d';
-delete state.user;
-const save = () => { try { localStorage.setItem('cu2', JSON.stringify({ ...state, zoom: null })); } catch {} };
+delete state.user; delete state.tab; delete state.zoom; delete state.fit;
+const save = () => { try { localStorage.setItem('cu2', JSON.stringify(state)); } catch {} };
 let D = null;
 const SKIP_PART = { recent: 'recent', features: 'features' };
 const layout = Layout.mount('team', $('#grid'), { before: $('#learn-btn'), load: Layout.account.load, save: Layout.account.save,
@@ -36,7 +36,7 @@ const clock = (ms) => {
 };
 const usd = (n) => (n == null ? '—' : n > 0 && n < 0.01 ? '<$0.01' : '$' + (n >= 1000 ? compact(n) : n.toFixed(n >= 100 ? 0 : 2)));
 const dur = (ms) => (ms == null ? '—' : ms < 1000 ? `${Math.round(ms)}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s` : ms < HOUR ? `${Math.floor(ms / 60_000)}m${pad(Math.round((ms % 60_000) / 1000))}` : `${Math.floor(ms / HOUR)}h${pad(Math.floor((ms % HOUR) / 60_000))}`);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad = (n) => String(n).padStart(2, '0');
 const ago = (t) => { if (!t) return 'never'; const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`; };
 const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
@@ -57,10 +57,10 @@ const isLive = (p) => p.last_active && Date.now() - p.last_active < 3 * 60_000;
 const displayName = (p) => p?.name || (p?.email || '').replace(/@.*/, '') || 'Unknown';
 const avatar = (p, cls = '') => `<span class="avatar ${cls}" style="background:${colorOf(p.user_key)}">${esc(initials(p))}<span class="presence${isLive(p) ? ' on' : ''}"></span></span>`;
 
-const RANGE_LEN = { '1d': DAY, '7d': 7 * DAY, '30d': 30 * DAY, '90d': 90 * DAY };
+const RANGE_DAYS = { '1d': 1, '7d': 7, '30d': 30, '90d': 90 };
 function bounds() {
-  const now = Date.now(), len = RANGE_LEN[state.range] || 7 * DAY;
-  return { from: now - len, to: now, len };
+  const w = PuddleWhen.window(RANGE_DAYS[state.range] || 7);
+  return { from: w.from, to: w.to, len: w.to - w.from };
 }
 if (new URLSearchParams(location.search).get('demo') === '1') state.demo = true;
 const TEAM = new URLSearchParams(location.search).get('team');
@@ -71,7 +71,7 @@ const api = (u) => {
 };
 function qs(extra = {}) {
   const { from, to } = bounds();
-  return new URLSearchParams({ from, to: to + 60_000, ...extra }).toString();
+  return new URLSearchParams({ from, to, ...extra }).toString();
 }
 
 const tip = $('#tip');
@@ -166,8 +166,6 @@ function ring(segments, value, unit, label, sev = '') {
     <text class="rv" x="50" y="${unit ? 53 : 57}" text-anchor="middle">${esc(value)}</text>
     ${unit ? `<text class="ru" x="50" y="67" text-anchor="middle">${esc(unit)}</text>` : ''}</svg>`;
 }
-const severity = (pct) => (pct >= 90 ? { color: 'var(--critical)', mark: '<span class="sev crit" aria-label="critical">●</span>' } : pct >= 70 ? { color: 'var(--warn)', mark: '<span class="sev warn" aria-label="high">▲</span>' } : { color: 'var(--s1)', mark: '' });
-
 const REDUCED = { get matches() { return !Motion.any(); } };
 const FEATS = [
   ['skills', 'S', 'Skills'], ['mcp', 'M', 'MCP connectors'], ['subagents', 'A', 'Subagents'],
@@ -253,29 +251,6 @@ const handsOff = (p) => {
 };
 const hmm = (m) => `${Math.floor((m || 0) / 60)}:${String(Math.round((m || 0) % 60)).padStart(2, '0')}`;
 
-const laneTotal = (b) => (b ? b.slice(1, 1 + CATS.length).reduce((a, v) => a + v, 0) : 0);
-function laneSvg(p, scale, liveNow) {
-  const L = p.lane || [], n = L.length, H = 32, base = H - 5;
-  let h = `<rect x="0" y="${base}" width="${n * 6}" height=".6" fill="var(--axis)"/>`;
-  L.forEach((b, i) => {
-    if (!b) return;
-    const tot = laneTotal(b), x = i * 6 + 0.6;
-    const hh = tot ? Math.max(2.5, Math.sqrt(tot / scale) * (base - 4)) : 0;
-    let y = base;
-    CATS.forEach((k, j) => { const v = b[1 + j]; if (!v) return; const sh = (hh * v) / tot; y -= sh; h += `<rect x="${x}" y="${y.toFixed(2)}" width="4.8" height="${sh.toFixed(2)}" fill="${CAT[k].c}"/>`; });
-    if (b[0]) h += `<rect x="${x + 0.9}" y="${base + 1.6}" width="3" height="${Math.min(3.4, 1.4 + b[0] * 0.4)}" rx=".6" fill="var(--ink)"/>`;
-    if (b[1 + CATS.length] && b[1 + CATS.length] >= Math.max(1, tot * 0.1)) h += `<rect x="${x + 0.9}" y="${Math.max(0, y - 4)}" width="3" height="3" rx="1.5" fill="var(--critical)"/>`;
-  });
-  if (liveNow) h += `<rect class="lane-now" x="${n * 6 - 2}" y="2" width="2" height="${base - 2}" fill="var(--good)"/>`;
-  return `<svg class="lane" viewBox="0 0 ${n * 6} ${H}" preserveAspectRatio="none" aria-hidden="true">${h}</svg>`;
-}
-function mixBar(mix) {
-  const tot = CATS.reduce((a, k) => a + (mix[k] || 0), 0);
-  if (!tot) return '<div class="wm empty-bar"></div>';
-  const dom = dominant(mix);
-  return `<div class="wm">${CATS.map((k) => (mix[k] ? `<i style="flex:${mix[k]};background:${CAT[k].c}"></i>` : '')).join('')}</div>
-    <div class="dom" style="--c:${CAT[dom].c}">${icon(dom)}<span>${CAT[dom].label}</span><small>${Math.round((mix[dom] / tot) * 100)}%</small></div>`;
-}
 const toolLabel = (t) => String(t || '').replace(/^mcp__/, '').replace(/__/g, ' · ').replace(/_/g, ' ');
 function worksOn(p) {
   const tot = CATS.reduce((a, k) => a + (p.mix[k] || 0), 0);
@@ -324,13 +299,11 @@ function renderPeople(d) {
   const sort = state.bsort || { key: 'now', dir: -1 };
   const col = BCOLS.find((c) => c.key === sort.key) || BCOLS[1];
   const list = [...team].sort((a, b) => { const x = col.get(a), y = col.get(b); return (x > y ? 1 : x < y ? -1 : 0) * sort.dir || b.prompts - a.prompts; });
-  const scale = Math.max(1, ...team.flatMap((p) => (p.lane || []).map(laneTotal)));
   const maxP = Math.max(1, ...team.map((p) => p.prompts));
   const maxM = Math.max(1, ...team.map((p) => p.activeMinutes || 0));
-  const span = d.team.lane ? Date.now() - d.team.lane.from : 0;
   const el = $('#ptable');
   const before = new Map([...el.querySelectorAll('.brow.body')].map((r) => [r.dataset.u, r.getBoundingClientRect().top]));
-  const headHtml = BCOLS.map((c) => `<span role="columnheader" data-k="${c.key}" data-learn="col:${{ now: 'now', mix: 'mix', prompts: 'prompts', autonomy: 'autonomy', limits: 'limits' }[c.key]}" ${c.key === sort.key ? `aria-sort="${sort.dir > 0 ? 'ascending' : 'descending'}"` : ''}>${c.key === 'lane' ? `<span>${c.label}</span><span class="axis-end">${span > 2 * DAY ? Math.round(span / DAY) + ' days' : 'today'} → now</span>` : c.label}</span>`).join('');
+  const headHtml = BCOLS.map((c) => `<span role="columnheader" data-k="${c.key}" data-learn="col:${{ now: 'now', mix: 'mix', prompts: 'prompts', autonomy: 'autonomy', limits: 'limits' }[c.key]}" ${c.key === sort.key ? `aria-sort="${sort.dir > 0 ? 'ascending' : 'descending'}"` : ''}>${c.label}</span>`).join('');
   let head = el.querySelector('.brow.head');
   if (!head) { el.innerHTML = ''; head = document.createElement('div'); head.className = 'brow head'; head.setAttribute('role', 'row'); el.appendChild(head); }
   const put = (node, html) => { if (node._h !== html) { node._h = html; node.innerHTML = html; } };
@@ -502,6 +475,7 @@ const featureIn = (atlas, cc) => {
 };
 const pointFor = (atlas, p) => TZ_LL[p.timezone] || (featureIn(atlas, p.country) ? d3.geoCentroid(featureIn(atlas, p.country)) : SMALL[p.country]) || null;
 
+if ('ResizeObserver' in globalThis && $('#map')) new ResizeObserver(() => { const m = $('#map'); if (m._list && m._key) renderMap(m._list); }).observe($('#map'));
 async function renderMap(list) {
   const el = $('#map');
   el._list = list;
@@ -512,6 +486,7 @@ async function renderMap(list) {
   if (!base) { el.innerHTML = `<div class="map-off">${list.map((p) => flag(p.country)).join(' ') || '🌍'}</div>`; return; }
   const W = el.clientWidth || 400, H = el.clientHeight || 220, R = W < 340 ? 9 : 11;
   const pts = list.map((p) => [p, pointFor(base, p)]).filter(([, ll]) => ll);
+  el.toggleAttribute('data-none', !pts.length);
   let x0 = 180, x1 = -180, y0 = 90, y1 = -90;
   for (const [, [lo, la]] of pts) { x0 = Math.min(x0, lo); x1 = Math.max(x1, lo); y0 = Math.min(y0, la); y1 = Math.max(y1, la); }
   if (!pts.length) { x0 = -170; x1 = 170; y0 = -50; y1 = 70; }
@@ -552,7 +527,7 @@ async function renderMap(list) {
   }
   const prev = el._world && list.length ? el.querySelector('svg') : null, from = el._world;
   el._world = list.length ? null : proj;
-  if (prev && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (prev && !REDUCED.matches) {
     const [a, b] = from([x0, y1]), [c, d] = from([x1, y0]), k = Math.max(1, Math.min(8, Math.min(W / Math.max(1, c - a), H / Math.max(1, d - b))));
     const tx = W / 2 - ((a + c) / 2) * k, ty = H / 2 - ((b + d) / 2) * k;
     el.style.position = 'relative';
@@ -583,149 +558,7 @@ function updatePins(el, list) {
   }
 }
 
-const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
 const tzMin = () => -new Date().getTimezoneOffset();
-function tlWindow() {
-  if (state.zoom) return { ...state.zoom, zoomed: true };
-  if (state.tab === 'live') { const to = Date.now(); return { from: to - HOUR, to }; }
-  const { from, to } = bounds();
-  return { from, to };
-}
-const bucketFor = (ms) => STEPS.find((m) => ms / (m * 60_000) <= 120) || 1440;
-const resLabel = (m) => (m < 60 ? `${m} min` : m < 1440 ? `${m / 60} h` : '1 day');
-
-
-function renderTimeline(d) {
-  if (!$('#timeline')) return;
-  const tl = d.tl, win = d.tlWin, el = $('#timeline');
-  const bMin = tl.bucketMs / 60_000;
-  $('#tl-res').innerHTML = `▮ ${resLabel(bMin)}${tl.fitted || state.fit === false ? ` · <button class="fit-btn" id="tl-fit" title="${tl.fitted ? 'Framed to activity — show the whole period' : 'Frame to activity'}">${tl.fitted ? '⤢ fit' : '⤡ full'}</button>` : ''}`;
-  const fb = $('#tl-fit');
-  if (fb) fb.onclick = () => { state.fit = tl.fitted ? false : true; save(); load(); };
-  const z = $('#tl-zoom');
-  z.hidden = !state.zoom;
-  if (state.zoom) z.querySelector('span').textContent = `${fmtT(state.zoom.from, state.zoom.to - state.zoom.from)}–${fmtT(state.zoom.to, state.zoom.to - state.zoom.from)}`;
-  for (const b of document.querySelectorAll('#act-tabs button')) b.setAttribute('aria-pressed', String(!state.zoom && b.dataset.t === state.tab));
-
-  const team = people.length > 1;
-  const series = [{ key: 'tok', label: 'Team', color: 'var(--s1)' }];
-  $('#tl-title').textContent = SOLO ? 'Your tokens' : 'Team tokens';
-
-  const B = tl.bucketMs, off = tzMin() * 60_000;
-  const first = Math.floor((win.from + off) / B) * B - off;
-  const keys = [];
-  for (let t = first; t < win.to && keys.length < 500; t += B) keys.push(t);
-  const by = new Map(tl.buckets.map((b) => [b.t, b]));
-  const byU = new Map();
-  for (const r of tl.byUser) { if (!byU.has(r.t)) byU.set(r.t, {}); byU.get(r.t)[r.user_key] = r.tokens; }
-  const val = (t) => { const b = by.get(t); return b ? (b.input || 0) + (b.output || 0) + (b.cacheRead || 0) + (b.cacheCreation || 0) : 0; };
-
-  const W = el.clientWidth || 600, H = el.clientHeight || 260;
-  const m = { l: 44, r: 10, t: 6 };
-  const iw = W - m.l - m.r;
-  const L = { axis: 16, cum: 34, gap: 8 };
-  const tokH = H - m.t - L.axis - L.cum - L.gap * 2;
-  const yTok0 = m.t, yCum0 = yTok0 + tokH + L.gap, yEnd = yCum0 + L.cum, yAxis = yEnd + L.gap;
-  const span = win.to - win.from;
-  const x = (t) => m.l + ((t - win.from) / span) * iw;
-  const tx = (px) => win.from + ((px - m.l) / iw) * span;
-
-  const totals = keys.map((t) => series.reduce((a, s1) => a + val(t, s1.key), 0));
-  const max = niceMax(Math.max(0, ...totals));
-  const yT = (v) => yTok0 + tokH - (v / max) * tokH;
-  const bw = Math.max(1, Math.min(18, (iw / keys.length) * 0.74));
-
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Timeline">`;
-  const clean = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); return [1, 2, 2.5, 5, 10].some((q) => Math.abs(v / e - q) < 1e-9); };
-  const nt = [4, 3, 2].find((n) => clean(max / n)) || 3;
-  for (let i = 0; i <= nt; i++) {
-    const yy = yT((max / nt) * i);
-    svg += `<line class="${i ? 'gl' : 'bl'}" x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}"/>`;
-    if (i) svg += `<text x="${m.l - 6}" y="${yy + 3}" text-anchor="end">${compact((max / nt) * i)}</text>`;
-  }
-  svg += `<text class="lane-l" x="${m.l - 6}" y="${yCum0 + L.cum / 2 + 3}" text-anchor="end">${showCost() ? '$' : 'Σ tok'}</text>`;
-
-  const newest = keys[keys.length - 1];
-  keys.forEach((t, i) => {
-    const cx = x(t + B / 2);
-    let base = 0;
-    const segs = series.map((s1) => ({ s1, v: val(t, s1.key) })).filter((g) => g.v > 0);
-    if (!segs.length) return;
-    svg += `<g class="${t === newest && !win.zoomed && state.tab === 'live' ? 'bar-new' : ''}">`;
-    segs.forEach((g, j) => {
-      const y0 = yT(base), y1 = yT(base + g.v), top = j === segs.length - 1;
-      const h = Math.max(1, y0 - y1 - (top || bw < 4 ? 0 : 1.5)), x0 = cx - bw / 2, yt = y0 - h, r = top ? Math.min(3, h, bw / 2) : 0;
-      svg += r ? `<path fill="${g.s1.color}" d="M${x0},${y0}V${yt + r}Q${x0},${yt} ${x0 + r},${yt}H${x0 + bw - r}Q${x0 + bw},${yt} ${x0 + bw},${yt + r}V${y0}Z"/>`
-               : `<rect fill="${g.s1.color}" x="${x0}" y="${yt}" width="${bw}" height="${h}"/>`;
-      base += g.v;
-    });
-    svg += '</g>';
-  });
-
-  let run = 0;
-  const cumOf = (b) => (showCost() ? b?.cost : (b?.input || 0) + (b?.output || 0) + (b?.cacheRead || 0) + (b?.cacheCreation || 0)) || 0;
-  const pts = keys.map((t) => { run += cumOf(by.get(t)); return [Math.min(W - m.r, x(t + B)), run]; });
-  const cmax = Math.max(run, 1e-9), yC = (v) => yCum0 + L.cum - 2 - (v / cmax) * (L.cum - 6);
-  svg += `<line class="bl" x1="${m.l}" x2="${W - m.r}" y1="${yCum0 + L.cum - 2}" y2="${yCum0 + L.cum - 2}"/>`;
-  if (run > 0) {
-    const line = `M${m.l},${yC(0)}` + pts.map(([px, v]) => `L${px.toFixed(1)},${yC(v).toFixed(1)}`).join('');
-    svg += `<path class="cum-a" d="${line}L${pts[pts.length - 1][0]},${yCum0 + L.cum - 2}L${m.l},${yCum0 + L.cum - 2}Z"/><path class="cum" d="${line}"/>`;
-    const lx = Math.min(pts[pts.length - 1][0], W - m.r);
-    svg += `<text class="cum-v" x="${lx - 4}" y="${yC(run) - 5}" text-anchor="end">${showCost() ? usd(run) : compact(run)}</text>`;
-  }
-
-  const now = Date.now();
-  if (now >= win.from && now <= win.to + B) {
-    const nx = Math.min(x(now), W - m.r);
-    svg += `<line class="now-l" x1="${nx}" x2="${nx}" y1="${yTok0}" y2="${yEnd}"/><circle class="now-d" cx="${nx}" cy="${yTok0}" r="3"/>`;
-  }
-
-  const tickMin = [1, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10080].find((q) => span / (q * 60_000) <= 8) || 10080;
-  const TB = tickMin * 60_000;
-  for (let t = Math.ceil((win.from + off) / TB) * TB - off; t <= win.to; t += TB) {
-    svg += `<line class="gl" x1="${x(t)}" x2="${x(t)}" y1="${yAxis - 3}" y2="${yAxis}"/><text x="${x(t)}" y="${yAxis + 11}" text-anchor="middle">${fmtT(t, span)}</text>`;
-  }
-  svg += `<line class="xh" id="tl-xh" x1="0" x2="0" y1="${yTok0}" y2="${yEnd}" visibility="hidden"/><rect class="sel" id="tl-sel" x="0" y="${yTok0}" width="0" height="${yEnd - yTok0}" visibility="hidden"/>`;
-  if (!totals.some(Boolean)) svg += `<text x="${m.l + iw / 2}" y="${yTok0 + tokH / 2}" text-anchor="middle" font-size="12">quiet — nothing in this window</text>`;
-  el.innerHTML = svg + '</svg>';
-
-  const xh = el.querySelector('#tl-xh'), sel = el.querySelector('#tl-sel'), svgEl = el.querySelector('svg');
-  const px = (e) => { const r = svgEl.getBoundingClientRect(); return ((e.clientX - r.left) / r.width) * W; };
-  let drag = null;
-  svgEl.onpointerdown = (e) => { drag = px(e); svgEl.setPointerCapture(e.pointerId); };
-  svgEl.onpointermove = (e) => {
-    const p0 = Math.max(m.l, Math.min(W - m.r, px(e)));
-    if (drag != null) {
-      const a = Math.max(m.l, Math.min(drag, p0)), b = Math.min(W - m.r, Math.max(drag, p0));
-      sel.setAttribute('x', a); sel.setAttribute('width', b - a); sel.setAttribute('visibility', 'visible');
-      hideTip(); return;
-    }
-    const t = tx(p0), k = Math.floor((t + off) / B) * B - off, b = by.get(k) || {};
-    xh.setAttribute('x1', p0); xh.setAttribute('x2', p0); xh.setAttribute('visibility', 'visible');
-    const tokRows = team
-      ? Object.entries(byU.get(k) || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([u, v]) => { const p = people.find((x) => x.user_key === u); return [p ? displayName(p) : '—', compact(v), colorOf(u)]; })
-      : [['Tokens', compact(val(k)), series[0].color]];
-    showTip(e, `<b>${fmtT(k, Math.min(span, B * 2))}${bMin < 1440 ? `–${new Date(k + B).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}</b>` +
-      rows([...tokRows, ...(showCost() ? [['Spend', usd(b.cost || 0)]] : []), ['Requests', nf.format(b.requests || 0)], ['Prompts', nf.format(b.prompts || 0)], ['Tools', `${nf.format(b.tools || 0)}${b.fails ? ` · ${b.fails} failed` : ''}`]]));
-  };
-  const end = (e) => {
-    if (drag == null) return;
-    const a = tx(Math.max(m.l, Math.min(drag, px(e)))), b = tx(Math.min(W - m.r, Math.max(drag, px(e))));
-    drag = null; sel.setAttribute('visibility', 'hidden');
-    if (b - a >= 5 * 60_000 && Math.abs(x(b) - x(a)) > 8) { state.zoom = { from: Math.round(a), to: Math.round(b) }; save(); load(); }
-  };
-  svgEl.onpointerup = end;
-  svgEl.onpointercancel = () => { drag = null; sel.setAttribute('visibility', 'hidden'); };
-  svgEl.onpointerleave = () => { xh.setAttribute('visibility', 'hidden'); if (drag == null) hideTip(); };
-  svgEl.ondblclick = () => { if (state.zoom) { state.zoom = null; save(); load(); } };
-}
-function fmtT(t, span) {
-  const d = new Date(t);
-  if (span <= 2 * DAY) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (span <= 14 * DAY) return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric' });
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
 const resetText = (t) => { if (!t) return ''; const d = new Date(t), now = new Date(); const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   return d.toDateString() === now.toDateString() ? `resets ${hm}` : t - now < 7 * 864e5 ? `resets ${d.toLocaleDateString([], { weekday: 'short' })} ${hm}` : `resets ${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}`; };
 const asOf = (t) => { const d = new Date(t); return d.toDateString() === new Date().toDateString() ? `as of ${pad(d.getHours())}:${pad(d.getMinutes())}` : `as of ${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`; };
@@ -738,6 +571,7 @@ function renderModels(team) {
     ['Client', 'conversations', agg((p) => p.clients.map((c) => [AG()?.client(c.client)?.label || c.client.replace(/^claude-/, ''), c.sessions]))],
   ];
   const hits = team.reduce((a, p) => a + (p.cacheHit != null ? p.cacheHit * p.tokens : 0), 0) / Math.max(1, team.reduce((a, p) => a + (p.cacheHit != null ? p.tokens : 0), 0));
+  if (!sections.some(([, , items]) => items.length)) { $('#models').innerHTML = '<p class="muted card-none">Fills in once someone on the team works with Claude Code or Codex.</p>'; return; }
   $('#models').innerHTML = sections.map(([title, unit, items]) => {
     const tot = items.reduce((a, [, v]) => a + v, 0) || 1;
     return `<div class="mixbar" data-learn="mix:${title}"><div class="lbl"><span>${title}</span><span class="muted">${unit}</span></div>
@@ -794,7 +628,7 @@ const cards = (() => {
   let newest = 0;
   const fetchCard = async (c) => {
     asked[c.key] = paramsKey();
-    const q = new URLSearchParams({ from: bounds().from, to: Date.now() + 60_000, tz: tzMin() });
+    const q = new URLSearchParams({ from: bounds().from, to: bounds().to, tz: tzMin() });
     const r = await fetch(api(`${c.url}?${q}`)).then((x) => (x.ok ? x.json() : null)).catch(() => null);
     if (!r) return;
     got[c.key] = r;
@@ -852,15 +686,15 @@ const cards = (() => {
 })();
 
 let loading = null, again = false;
-const rangeBounds = (r) => { const now = Date.now(); return { from: now - (RANGE_LEN[r] || 7 * DAY), to: now }; };
+const rangeBounds = (r) => { const w = PuddleWhen.window(RANGE_DAYS[r] || 7); return { from: w.from, to: w.to }; };
 const inflight = new Map();
 let viewCtl = null;
 function fetchView(r, { prefetch = false } = {}) {
   const hit = inflight.get(r);
   if (!prefetch && hit && Date.now() - hit.at < 5000) { inflight.delete(r); return hit.promise; }
   const { from, to } = rangeBounds(r);
-  const bq = new URLSearchParams({ from, to: to + 60_000 });
-  const tq = new URLSearchParams({ from, to: Date.now() + 60_000, tz: tzMin(), parts: 'core', ...(skipped() ? { skip: skipped() } : {}) });
+  const bq = new URLSearchParams({ from, to });
+  const tq = new URLSearchParams({ from, to, tz: tzMin(), parts: 'core', ...(skipped() ? { skip: skipped() } : {}) });
   let signal;
   if (!prefetch) { if (viewCtl && viewCtl.range !== r) viewCtl.abort(); viewCtl = new AbortController(); viewCtl.range = r; signal = viewCtl.signal; }
   const opt = { signal, ...(prefetch ? { headers: { 'x-puddle-prefetch': '1' } } : {}) };
@@ -936,15 +770,6 @@ async function load() {
   })();
   return loading;
 }
-const RANGE_WORD = { '1d': 'Last 24 hours', '7d': 'Last 7 days', '30d': 'Last 30 days', '90d': 'Last 90 days' };
-function renderSummary(d) {
-  const el = $('#summary'), items = d.team.summary || [];
-  const html = `<header><h2>In plain words</h2><span class="chip">${RANGE_WORD[state.range] || 'This period'}</span></header>
-    ${items.length ? `<ul class="plain">${items.map((x, i) => `<li data-i="${i}" class="${x.level === 'warn' ? 'warn' : ''}">${esc(x.text)}</li>`).join('')}</ul>` : '<p class="muted">Nothing to say yet: no prompts in this period.</p>'}
-    <p class="plain-note">Time and counts only. They show how agents are used, not how good the work is; prompts and code are never seen.</p>`;
-  if (el._h !== html) { el._h = html; el.innerHTML = html; }
-  for (const li of el.querySelectorAll('li')) { const x = items[+li.dataset.i]; hover(li, `<b>Why</b><div>${esc(x.evidence || '')}</div>`); }
-}
 function renderPrompts(d) {
   const ppl = new Map(d.team.people.map((p) => [p.user_key, p]));
   globalThis.mountPrompts?.(document.querySelector('[data-card="prompts"]'), d.team.lastDay, { hover, rows, who: (k) => displayName(ppl.get(k)), colorOf, learn: 'card:prompts' });
@@ -967,9 +792,23 @@ function renderLines(d) {
   card.hidden = !list.length; card.dataset.empty = list.length ? '' : '1';
   if (list.length) globalThis.mountCodeLines($('#lines'), list, { from: bounds().from, now: Date.now(), hover, rows });
 }
+function inviteNote() {
+  const id = new URLSearchParams(location.search).get('team');
+  let t = null; try { t = JSON.parse(localStorage.getItem('puddle-nav') || 'null')?.teams?.find((x) => x.id === id); } catch {}
+  if (id && !t && !inviteNote.asked) { inviteNote.asked = true; fetch('/api/me/nav').then((r) => (r.ok ? r.json() : null)).then((n) => { const x = n?.teams?.find((y) => y.id === id); if (x) { try { localStorage.setItem('puddle-nav', JSON.stringify(n)); } catch {} inviteNote(); } }).catch(() => {}); }
+  const alone = Boolean(id && t?.owner && Number(t.members) <= 1 && D?.team?.people?.length <= 1);
+  let n = $('#invite-note');
+  if (!alone) { n?.remove(); return; }
+  if (n) return;
+  n = Object.assign(document.createElement('section'), { id: 'invite-note', className: 'card invite-note' });
+  n.innerHTML = `<div><h2>Just you so far</h2><p class="muted">Invite your team: they open the link, get Puddle and sign in, and each person chooses what the team sees.</p></div><a class="pill invite-go" href="/settings/team/${encodeURIComponent(id)}">Invite people</a>`;
+  $('#grid')?.prepend(n);
+}
+
 function render() {
   if (!D || document.body.classList.contains('leaving')) return;
   $('#grid')?.setAttribute('aria-busy', 'false');
+  inviteNote();
   for (const c of document.querySelectorAll('#grid > .card[data-wait]')) if (!cards.lazy(c.dataset.card) || cards.got(c.dataset.card)) reveal(c);
   if (shownCard('recent')) renderProjects(D);
   if (shownCard('lines')) renderLines(D);
@@ -1105,13 +944,11 @@ soundBtn.onclick = () => {
   if (Sound.on) { Sound.play('toggle'); soundBtn.classList.remove('ping'); void soundBtn.offsetWidth; soundBtn.classList.add('ping'); }
 };
 for (const b of document.querySelectorAll('#range button')) b.onclick = () => {
-  state.range = b.dataset.r; state.tab = 'range'; state.zoom = null; save();
+  state.range = b.dataset.r; save();
   for (const x of document.querySelectorAll('#range button')) x.setAttribute('aria-pressed', String(x === b));
   load();
 };
 for (const b of document.querySelectorAll('#range button')) { b.addEventListener('pointerenter', () => prefetch(b.dataset.r)); b.addEventListener('pointerdown', () => prefetch(b.dataset.r)); }
-for (const b of document.querySelectorAll('#act-tabs button')) b.onclick = () => { state.tab = b.dataset.t; state.zoom = null; save(); load(); };
-$('#tl-zoom')?.addEventListener('click', () => { state.zoom = null; save(); load(); });
 const learnBtn = $('#learn-btn');
 function applyLearn() { document.body.classList.toggle('learn', LEARN.on); learnBtn.setAttribute('aria-pressed', String(LEARN.on)); learnBtn.title = LEARN.on ? 'Learn mode on: hover anything for an explanation' : 'Learn mode: explain everything'; }
 learnBtn.onclick = () => { LEARN.on = !LEARN.on; applyLearn(); hideTip(); Sound.play('toggle'); toast(LEARN.on ? '? Learn mode on — hover anything to see what it means' : 'Learn mode off'); };

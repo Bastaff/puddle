@@ -11,7 +11,7 @@ test('demo team: separate database with every person and their way of working', 
   const demo = makeDemo(path.join(dir, 'demo.db'), { now: () => now });
   try {
     const q = demo.queries();
-    const team = (await q.team({ from: now - 7 * 86400_000, to: now + 60_000 }, 60));
+    const team = (await q.team({ from: now - 7 * 86400_000, to: now }, 60));
     assert.equal(team.people.length, DEMO_PEOPLE.length);
     const by = Object.fromEntries(team.people.map((p) => [p.name, p]));
     assert.ok(by['Jonas Weber'].mix.run > by['Jonas Weber'].mix.edit, 'Jonas mostly runs commands');
@@ -21,8 +21,6 @@ test('demo team: separate database with every person and their way of working', 
     assert.ok(by['Yuki Tanaka'].flags.some((f) => f.kind === 'broken'), 'broken connector');
     assert.ok(!by['Ava Martin'].flags.length, 'occasional user is not flagged');
     assert.ok(!by['Lena Fischer'].flags.length, 'steady person is not flagged');
-    assert.equal(by['Lena Fischer'].lane.length, 48);
-    assert.ok(by['Lena Fischer'].lane.some(Boolean));
     const leaks = (await q.exportEvents({ from: 0, to: now + 60_000 })).filter((e) => e.error && !/^(exit_code|tool_error|overloaded|ShellError|rate_limit_error)$/.test(e.error));
     assert.equal(leaks.length, 0);
   } finally {

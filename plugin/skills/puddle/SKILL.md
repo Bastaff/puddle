@@ -6,7 +6,7 @@ allowed-tools: Bash(puddle setup), Bash(puddle status), Bash(puddle off)
 
 # Puddle
 
-Puddle shows people how they use their coding agents. It shares only counts, token totals, tool names, timings, prompt lengths and repository names. It never shares prompts, the agent's answers, code, file contents, commands or file paths.
+Puddle shows people how they use their coding agents. It shares only counts, token totals, tool names, timings, prompt lengths, repository names and conversation titles. It never shares prompts, the agent's answers, code, file contents, commands or file paths.
 
 Pick the action from what the user asked. With no argument, run setup.
 
@@ -14,7 +14,7 @@ Pick the action from what the user asked. With no argument, run setup.
   - It prints a short code and opens the browser, where the user signs in with their email and confirms the code.
   - Before running it, tell the user in one sentence what is shared and what is never shared, as above.
   - The command waits until the user confirms in the browser; let it run.
-  - When it finishes, tell the user to quit and reopen Claude Code (and Codex, if connected) so sharing starts, and give them the dashboard link it printed.
+  - When it finishes, tell the user that new Claude Code (and Codex) sessions share from now on, and give them the dashboard link it printed. Earlier work is already there from the session logs.
 - **Status**: run `puddle status` and relay the result.
 - **Turn off**: run `puddle off`. It restores the user's original settings.
 

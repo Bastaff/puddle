@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { makeCost } from '../companion/cost.js';
+import { makeCost, noteStop, stopsFile } from '../companion/cost.js';
 import { setupReport } from '../companion/report.js';
 
 test('the helper counts its own cost: reads of session logs, status line runs, an hourly row kept on the Mac', () => {
@@ -52,5 +52,23 @@ test('a freeze counts only as long as Puddle worked: a sleeping or paused Mac is
     assert.equal(cost.summary().blocks, 1);
     assert.equal(cost.summary().worstBlockMs, 3000);
     assert.equal(slow, 1);
+  } finally { cost.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the helper counts its own stops on an error for the check-in: the time and the error code only', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'puddle-stops-'));
+  const t = Date.parse('2026-11-18T10:00:00Z');
+  const cost = makeCost({ dir, now: () => t, timers: false });
+  try {
+    assert.equal(cost.summary().crashes, 0);
+    const locked = Object.assign(new Error('database is locked /Users/someone/secret.jsonl'), { code: 'ERR_SQLITE_ERROR' });
+    noteStop(dir, locked, t - 2 * 864e5);
+    noteStop(dir, locked, t - 3600_000);
+    noteStop(dir, new TypeError('x is not a function'), t - 60_000);
+    const s = cost.summary();
+    assert.equal(s.crashes, 2);
+    assert.deepEqual(s.crashKinds, { ERR_SQLITE_ERROR: 1, TypeError: 1 });
+    const kept = fs.readFileSync(stopsFile(dir), 'utf8');
+    assert.doesNotMatch(kept, /secret|locked|function/);
   } finally { cost.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -24,4 +24,6 @@ Puddle is a Mac menu bar app that counts how someone works with their coding age
 
 ## Checking a change
 
-`npm test`, then `npm run dev:app` and look at it in Puddle Dev. Write code like the code around it.
+`npm run test:changed` runs the tests for what you changed; [docs/testing.md](docs/testing.md) says which checks each
+kind of change needs (a look-only change doesn't need the database tests). The full `npm test` is for releases. Then
+`npm run dev:app` and look at it in Puddle Dev. Write code like the code around it.

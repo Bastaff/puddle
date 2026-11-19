@@ -47,10 +47,13 @@ const pick = ({ key, on, ico, title, sub, multi = true }) => `
     ${ico}<span class="txt"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span><span class="tick" aria-hidden="true"></span>
   </button>`;
 
-function screen({ q, hint = '', body, next = 'Continue', back = true, nextDisabled = false }) {
-  $('#app').innerHTML = `<section class="screen">
-    <h1>${q}</h1>${hint ? `<p class="hint">${hint}</p>` : ''}
-    <div class="list">${body}</div>
+const tile = ({ lbl, num = null, line = '', pic = '', ico = '', cls = '', t = 0 }) => `<div class="tile land ${cls}" style="--t:${t}s">${ico}<div class="lbl">${esc(lbl)}</div>${num == null ? '' : `<div class="big">${esc(num)}</div>`}<div class="line">${esc(line)}</div>${pic}</div>`;
+const ghosts = (k) => '<div class="tile blank" aria-hidden="true"></div>'.repeat(k);
+
+function screen({ lbl = '', q, hint = '', body, next = 'Continue', back = true, nextDisabled = false }) {
+  $('#app').innerHTML = `<section class="screen tiles">
+    ${lbl ? `<div class="lbl">${lbl}</div>` : ''}<h1>${q}</h1>${hint ? `<p class="hint">${hint}</p>` : ''}
+    <div class="hl">${body}</div>
     <div class="go">${back ? '<button class="ghost" id="back" type="button" aria-label="Back">‹</button>' : ''}${next ? `<button class="next" id="next" type="button" ${nextDisabled ? 'disabled' : ''}>${next}</button>` : ''}</div>
   </section>`;
   $('#back')?.addEventListener('click', () => go(prev(state.step)));
@@ -80,10 +83,11 @@ function wayOn(failed) {
 
 async function scanning(fresh = false) {
   $('#steps').innerHTML = '<li class="done"></li>';
-  $('#app').innerHTML = `<section class="screen center">
-    <div class="radar" aria-hidden="true"><i></i><i></i><i></i><div class="found" id="found"></div></div>
+  $('#app').innerHTML = `<section class="screen tiles">
+    <div class="lbl">Step 1</div>
     <h1 id="scan-title">Looking for agents</h1>
     <p class="hint" id="scan-hint">Settings only. Never what you typed.</p>
+    <div class="hl" id="found">${ghosts(4)}</div>
   </section>`;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const wait = (ms) => new Promise((r) => setTimeout(r, reduced ? 0 : ms));
@@ -92,13 +96,23 @@ async function scanning(fresh = false) {
   catch (e) { $('#scan-title').textContent = "Couldn't look around"; $('#scan-hint').textContent = e.message; wayOn(true); return; }
   if (saved) return state.invite?.real ? go('team') : MODE === 'app' ? settingsScreen() : go('menubar');
   const found = [...new Set(state.scan.accounts.map((a) => a.tool))];
-  for (const t of found) { $('#found').insertAdjacentHTML('beforeend', icon(t)); await wait(320); }
-  $('.radar').classList.add('done');
+  const box = $('#found'), spots = [...box.children];
+  for (const [i, t] of found.entries()) {
+    if (spots[i]) spots[i].outerHTML = agentTile(t); else box.insertAdjacentHTML('beforeend', agentTile(t));
+    await wait(320);
+  }
+  for (const g of spots.slice(found.length)) { g.classList.add('gone'); setTimeout(() => g.remove(), reduced ? 0 : 450); }
   $('#scan-title').textContent = found.length ? `Found ${found.length}` : 'No agents yet';
-  $('#scan-hint').textContent = found.length ? found.map((t) => TOOL[t]).join(' · ') : 'Install Claude Code or Codex. Puddle will notice.';
-  if (!found.length) return wayOn(false);
-  await wait(900);
+  if (!found.length) { $('#scan-hint').textContent = 'Install Claude Code or Codex. Puddle will notice.'; return wayOn(false); }
+  await wait(1800);
   if (state.step === 'scan') { await save(); go(after('scan')); }
+}
+
+function agentTile(t) {
+  const mine = state.scan.sessions.filter((s) => s.tool === t), kind = new Map(state.scan.places.map((p) => [p.key, p.type]));
+  const proj = new Set(mine.filter((s) => !LOOSE.has(kind.get(s.place))).map((s) => s.place)).size;
+  return tile({ ico: icon(t), lbl: globalThis.PuddleAgents.agent(t).name, num: mine.length.toLocaleString(),
+    line: proj ? `sessions · ${proj} project${proj === 1 ? '' : 's'}` : `session${mine.length === 1 ? '' : 's'}` });
 }
 
 function teamRows() {
@@ -114,8 +128,8 @@ function teamRows() {
 function team() {
   const inv = state.invite;
   for (const a of state.scan.accounts) state.team[a.key] = true;
-  const rows = realAccounts().map((a) => `<div class="srow acct">${icon(a.tool)}<span><b>${TOOL[a.tool]}</b><small>${esc(a.org || a.plan || 'account')}</small></span></div>`);
-  screen({ q: `Join ${esc(inv.team)}?`, hint: `${esc(inv.team)} sees all your Claude Code and Codex work on this Mac, your earlier work included. Time and counts only. Never your words.`,
+  const rows = realAccounts().map((a, i) => tile({ cls: 'small', ico: icon(a.tool), lbl: globalThis.PuddleAgents.agent(a.tool).name, line: a.org || a.plan || 'account', t: 0.1 + i * 0.12 }));
+  screen({ lbl: 'Invite', q:`Join ${esc(inv.team)}?`, hint: `${esc(inv.team)} sees all your Claude Code and Codex work on this Mac, your earlier work included. Time and counts only. Never your words.`,
     body: rows.join('') || '<p class="foot">Nothing yet. Your work shows up as soon as you use Claude Code or Codex.</p>',
     next: inv.real ? `Join ${esc(inv.team)}` : 'Continue', back: false });
   $('#app .screen').insertAdjacentHTML('beforeend', '<button class="linkish" id="decline" type="button">Not now</button>');
@@ -133,120 +147,79 @@ function team() {
   };
 }
 
-function streak(list) {
-  const days = [...new Set(list.flatMap((s) => Object.keys(s.byDay)))].sort().map((d) => Date.parse(d) / 864e5);
-  let best = 0, run = 0; for (let i = 0; i < days.length; i++) { run = i && days[i] - days[i - 1] === 1 ? run + 1 : 1; best = Math.max(best, run); }
-  return best;
-}
-
-const SHARE_IC = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M8 11H6.5A2.5 2.5 0 0 0 4 13.5v5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5v-5a2.5 2.5 0 0 0-2.5-2.5H16"/></svg>';
-const BIG = [[1e12, 'trillion'], [1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']];
-const words = (x) => { for (const [v, w] of BIG) if (x >= v) return [(x / v).toFixed(x / v < 10 ? 1 : 0).replace(/\.0$/, ''), w]; return [String(Math.round(x)), '']; };
+const SIZES = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']];
+const short = (x) => { for (const [v, s] of SIZES) if (x >= v) return (x / v).toFixed(x / v < 10 ? 1 : 0).replace(/\.0$/, '') + s; return String(Math.round(x)); };
 const SCALE = [[90000, 'novel', 'novels'], [300, 'page', 'pages']];
-function picture(tokens) {
+function worth(tokens) {
   const w = tokens * 0.75;
-  for (const [per, one, many] of SCALE) if (w >= per) { const x = w / per, k = x < 100 ? Math.round(x) : Number(x.toPrecision(2)); return `≈ ${k.toLocaleString()} ${k === 1 ? one : many}’ worth of words`; }
-  return '';
+  for (const [per, one, many] of SCALE) if (w >= per) { const x = w / per, k = x < 100 ? Math.round(x) : Number(x.toPrecision(2)); return `≈ ${k.toLocaleString()} ${k === 1 ? one : many}’ worth`; }
+  return 'through your agents';
 }
 const hourName = (h) => `${String(h).padStart(2, '0')}:00`;
 const NIGHT = new Set(['Night owl', 'Evening hacker']);
 const rnd = (i) => { const x = Math.sin(i * 12.9898 + 4.1) * 43758.5453; return x - Math.floor(x); };
 const BOOK = ['var(--s1)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s7)', 'var(--s2)', 'var(--s6)'];
-const shelf = () => `<div class="shelf">${Array.from({ length: 24 }, (_, i) =>
-  `<i${i % 9 === 7 ? ' class="lean"' : ''} style="--h:${(55 + rnd(i) * 45).toFixed(0)}%;--c:${BOOK[(i * 3) % BOOK.length]};--d:${(0.15 + i * 0.035).toFixed(2)}s"></i>`).join('')}</div>`;
+const shelf = () => `<div class="pic shelf">${Array.from({ length: 22 }, (_, i) =>
+  `<i class="grow" style="--d:${(i * 0.03).toFixed(2)}s;--h:${(58 + rnd(i) * 42).toFixed(0)}%;--c:${BOOK[(i * 3) % BOOK.length]}"></i>`).join('')}</div>`;
 function dial(by, peak, night) {
   const max = Math.max(...by, 1);
   const spokes = by.map((v, h) => {
-    const a = (h / 24) * 2 * Math.PI + Math.PI / 2, r0 = 34, r1 = r0 + 4 + (v / max) * 34, c = Math.cos(a), si = Math.sin(a);
-    return `<line pathLength="1" x1="${(75 + r0 * c).toFixed(1)}" y1="${(75 + r0 * si).toFixed(1)}" x2="${(75 + r1 * c).toFixed(1)}" y2="${(75 + r1 * si).toFixed(1)}" style="--d:${(0.2 + h * 0.025).toFixed(3)}s"${h === peak ? ' class="peak"' : ''}/>`;
+    const a = (h / 24) * 2 * Math.PI + Math.PI / 2, r0 = 30, r1 = r0 + 6 + (v / max) * 36, c = Math.cos(a), si = Math.sin(a);
+    return `<line class="pop${h === peak ? ' peak' : ''}" style="--d:${(h * 0.02).toFixed(2)}s" x1="${(75 + r0 * c).toFixed(1)}" y1="${(75 + r0 * si).toFixed(1)}" x2="${(75 + r1 * c).toFixed(1)}" y2="${(75 + r1 * si).toFixed(1)}"/>`;
   }).join('');
-  const orb = night ? '<path class="orb moon" d="M80 62a14 14 0 1 0 8 22 11 11 0 0 1-8-22z"/>'
-    : `<g class="orb"><circle class="sun" cx="75" cy="75" r="10"/>${Array.from({ length: 8 }, (_, i) => { const a = i * Math.PI / 4; return `<line class="sun-ray" x1="${(75 + 14 * Math.cos(a)).toFixed(1)}" y1="${(75 + 14 * Math.sin(a)).toFixed(1)}" x2="${(75 + 19 * Math.cos(a)).toFixed(1)}" y2="${(75 + 19 * Math.sin(a)).toFixed(1)}"/>`; }).join('')}</g>`;
-  return `<svg class="dial${night ? ' night' : ''}" viewBox="0 0 150 150" aria-hidden="true"><circle class="face" cx="75" cy="75" r="28"/>${spokes}${orb}</svg>`;
+  const orb = night ? '<path class="moon" d="M80 60a15 15 0 1 0 9 24 12 12 0 0 1-9-24z"/>' : '<circle class="sun" cx="75" cy="75" r="13"/>';
+  return `<svg class="dial" viewBox="0 0 150 150" aria-hidden="true">${spokes}${orb}</svg>`;
 }
-const daysGrid = (last) => { const max = Math.max(...last, 1);
-  return `<div class="days">${last.map((v, i) => `<i class="${v ? 'on' : ''}${i === last.length - 1 ? ' today' : ''}" style="--o:${(55 + (v / max) * 45).toFixed(0)}%;--d:${(0.15 + i * 0.03).toFixed(2)}s"></i>`).join('')}</div>`; };
-const bars = (last) => { const max = Math.max(...last, 1), top = last.indexOf(max);
-  return `<div class="bars">${last.map((v, i) => `<i class="${i === top ? 'top' : ''}" style="--h:${((v / max) * 100).toFixed(0)}%;--d:${(0.15 + i * 0.025).toFixed(2)}s"></i>`).join('')}</div>`; };
-function revealCards(h) {
-  const cards = [], last = h.last28 || [];
-  if (h.tokens > 0) { const [v, w] = words(h.tokens); cards.push({ lbl: 'Through your agents', to: Number(v), dec: v.includes('.') ? 1 : 0, u: w ? `${w} tokens` : 'tokens', vis: shelf(), cap: picture(h.tokens) }); }
-  if (h.persona) cards.push({ lbl: 'You’re a', word: h.persona, side: dial(h.byHour || Array(24).fill(0), h.peakHour, NIGHT.has(h.persona)), cap: `Busiest around ${hourName(h.peakHour)}` });
-  if (h.streak?.current >= 2) cards.push({ lbl: 'On a roll', to: h.streak.current, u: 'days in a row', vis: last.length ? daysGrid(last.slice(-28)) : '', cap: h.streak.current >= h.streak.best ? 'Your longest streak yet, and counting' : `Your best: ${h.streak.best} days` });
-  else if (h.bestDay?.prompts) cards.push({ lbl: 'Your biggest day', to: h.bestDay.prompts, u: 'prompts', vis: last.length ? bars(last) : '', cap: new Date(h.bestDay.day + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) });
-  return cards;
+const squares = (vals) => { const max = Math.max(...vals, 1);
+  return `<div class="pic sq">${vals.map((v, i) => `<i class="pop${i === vals.length - 1 ? ' today' : ''}" style="--d:${(i * 0.02).toFixed(2)}s;--o:${v ? Math.round(45 + (v / max) * 55) : 0}%"></i>`).join('')}</div>`; };
+const bars = (vals) => { const max = Math.max(...vals, 1), top = vals.indexOf(max);
+  return `<div class="pic bars">${vals.map((v, i) => `<i class="grow${i === top ? ' peak' : ''}" style="--d:${(i * 0.018).toFixed(3)}s;--h:${Math.max(4, (v / max) * 100).toFixed(0)}%"></i>`).join('')}</div>`; };
+function highlightTiles(h, t0) {
+  const out = [], last = (h.last28 || []).slice(-28);
+  if (h.tokens > 0) out.push({ lbl: 'Tokens', num: short(h.tokens), line: worth(h.tokens), pic: shelf() });
+  if (h.persona && h.peakHour != null) out.push({ lbl: 'Busiest hour', num: hourName(h.peakHour), line: h.persona, pic: dial(h.byHour || Array(24).fill(0), h.peakHour, NIGHT.has(h.persona)) });
+  if (h.streak?.current >= 2) out.push({ lbl: 'On a roll', num: h.streak.current, line: `days in a row · best ${h.streak.best}`, pic: last.length ? squares(last) : '' });
+  if (h.bestDay?.prompts) out.push({ lbl: 'Biggest day', num: h.bestDay.prompts.toLocaleString(), line: `prompts · ${new Date(h.bestDay.day + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}`, pic: last.length ? bars(last) : '' });
+  return out.map((c, i) => tile({ ...c, t: t0 + i * 0.35 }));
 }
-const revealCard = (c) => `<div class="stage${c.word ? ' word' : ''}"><div class="lbl">${esc(c.lbl)}</div>
-  ${c.word ? `<div class="big">${esc(c.word)}</div>${c.side}` : `<div class="big num"><span data-to="${c.to}" data-dec="${c.dec || 0}">0</span>${c.u ? `<small>${esc(c.u)}</small>` : ''}</div><div class="vis">${c.vis || ''}</div>`}
-  <div class="cap">${esc(c.cap || '')}</div></div>`;
-function countUp(root, reduced) {
-  for (const el of root.querySelectorAll('[data-to]')) {
-    const to = Number(el.dataset.to), dec = Number(el.dataset.dec), fmt = (x) => (dec ? x.toFixed(dec) : Math.round(x).toLocaleString());
-    if (reduced) { el.textContent = fmt(to); continue; }
-    const t0 = performance.now(), step = (t) => { const k = Math.min(1, (t - t0) / 900); el.textContent = fmt(to * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(step); };
-    requestAnimationFrame(step);
-  }
-}
-async function reveal() {
-  const after = $('#after'), slot = $('#slot'), dots = $('#dots');
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+async function reveal(began, reduced) {
   let h = null;
   for (let i = 0; i < 5; i++) {
     h = await fetch(`/api/highlights?tz=${-new Date().getTimezoneOffset()}`).then((r) => r.json()).catch(() => null);
     if (h?.tokens > 0 || state.step !== 'done') break;
     await new Promise((r) => setTimeout(r, 900));
   }
-  if (state.step !== 'done' || !slot) return;
-  const cards = h ? revealCards(h) : [];
-  if (!cards.length || reduced) after.classList.remove('waiting');
-  if (!cards.length) return;
-  $('#reveal').hidden = false;
-  if (reduced) { slot.innerHTML = cards.map(revealCard).join(''); slot.classList.add('all'); countUp(slot, true); return; }
-  dots.innerHTML = cards.map(() => '<li></li>').join('');
-  let i = -1, timer = 0;
-  const show = () => {
-    if (state.step !== 'done' || !slot.isConnected) return;
-    i++; clearTimeout(timer);
-    slot.innerHTML = revealCard(cards[i]); countUp(slot);
-    [...dots.children].forEach((d, j) => d.classList.toggle('on', j <= i));
-    if (i === cards.length - 1) { after.classList.remove('waiting'); slot.onclick = null; slot.classList.remove('more'); return; }
-    timer = setTimeout(show, 3400);
-  };
-  slot.classList.add('more'); slot.onclick = show;
-  setTimeout(show, 1500);
+  const box = $('#hl');
+  if (state.step !== 'done' || !box) return;
+  const list = h ? highlightTiles(h, reduced ? 0 : Math.max(0, 1.3 - (performance.now() - began) / 1000)) : [];
+  if (!list.length) return box.remove();
+  box.innerHTML = list.join('');
 }
 
 function done() {
+  const began = performance.now(), reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const agents = [...new Set(state.scan.accounts.map((a) => a.tool))].map((t) => globalThis.PuddleAgents.agent(t).name);
-  const restartHtml = agents.length ? `<div class="askbox restart"><b>Restart ${esc(agents.join(' and '))} once</b>
+  const restartHtml = agents.length ? `<div class="restart"><b>Restart ${esc(agents.join(' and '))} once</b>
       <small>Your past work is in. New work shows up live after that.</small></div>` : '';
   const sparks = Array.from({ length: 28 }, (_, i) => {
-    const a = i * (360 / 28) + Math.random() * 10 - 5, d = 95 + Math.random() * 90, sz = 7 + Math.random() * 7;
+    const a = i * (360 / 28) + Math.random() * 10 - 5, d = 80 + Math.random() * 80, sz = 6 + Math.random() * 6;
     const col = ['#fff', '#ffd66b', '#ffe3d1'][i % 3];
     return `<i class="spark${i % 4 === 1 ? ' bar' : ''}" style="animation-delay:${(0.32 + Math.random() * 0.12).toFixed(2)}s;--a:${a.toFixed(0)}deg;--d:${d.toFixed(0)}px;--s:${sz.toFixed(1)}px;--c:${col};--r:${(Math.random() * 360).toFixed(0)}deg"></i>`;
   }).join('');
   document.body.insertAdjacentHTML('afterbegin', '<div class="cheer" aria-hidden="true"></div>');
   document.body.classList.add('celebrate');
-  const shareHtml = state.solo ? '' : `<button type="button" class="share-it" id="share">
-      <span class="ico share">${SHARE_IC}</span>
-      <span class="txt"><b>Share your progress</b><small>A live page for anyone with the link. You pick what it shows.</small></span>
-      <span class="chev" aria-hidden="true">›</span>
-    </button>`;
-  $('#app').innerHTML = `<section class="screen center allset">
+  $('#app').innerHTML = `<section class="screen tiles allset">
     <div class="burst" aria-hidden="true"><i class="wave"></i><i class="wave"></i>${sparks}
-      <div class="ring full"><svg viewBox="0 0 52 52" width="54" height="54"><path class="check" d="M14 27l8 8 16-18"/></svg></div></div>
+      <div class="ring full"><svg viewBox="0 0 52 52" width="42" height="42"><path class="check" d="M14 27l8 8 16-18"/></svg></div></div>
     <h1>${state.joined ? `You joined ${esc(state.joined.team.name)}` : 'All set'}</h1>
     <p class="hint">${state.joined ? 'They see all your agent work, your earlier work included. ' : ''}Puddle lives in your menu bar (✱).</p>
     ${restartHtml}
-    <div class="reveal" id="reveal" hidden><div class="slot" id="slot"></div><ol class="dots" id="dots" aria-hidden="true"></ol></div>
-    <div class="after waiting" id="after">
-    ${shareHtml}
-    <div class="go"><button class="next" id="next" type="button">Done</button></div>
-    </div>
+    <div class="hl" id="hl">${ghosts(4)}</div>
+    <div class="go">${state.solo ? '' : '<button class="next soft" id="share" type="button">Share</button>'}<button class="next" id="next" type="button">Open Me</button></div>
   </section>`;
   const r = $('.burst').getBoundingClientRect(), cheer = $('.cheer');
   cheer.style.setProperty('--cx', `${r.left + r.width / 2}px`); cheer.style.setProperty('--cy', `${r.top + r.height / 2}px`);
-  reveal();
+  reveal(began, reduced);
   const finish = (sharing = false) => { if (MODE === 'app') return handOff(sharing); go('menubar'); window.open(ME, '_blank'); };
   $('#next').onclick = () => finish();
   if ($('#share')) $('#share').onclick = async (e) => {
@@ -283,13 +256,14 @@ const post = (u, body) => fetch(u, { method: 'POST', headers: { 'content-type': 
   .then(async (r) => ({ ok: r.ok, d: await r.json().catch(() => ({})) }));
 function connectFirst(prefill = '') {
   $('#steps').hidden = true;
-  $('#app').innerHTML = `<section class="screen center">
-    <div class="ring full"><div>${logo(36)}</div></div>
+  $('#app').innerHTML = `<section class="screen tiles">
+    <div class="lbl">Welcome</div>
     <h1>Sign in to Puddle</h1>
     <p class="hint" id="hint">We email you a 6-digit code. No password.</p>
-    <form id="f" class="signin"><input id="email" type="email" autocomplete="email" placeholder="Your email" value="${esc(prefill)}" required>
-      <div class="go"><button class="next" id="next">Send code</button></div></form>
-    <button class="linkish" id="solo" type="button">Use without an account</button>
+    <div class="peek" aria-hidden="true"><div class="hl">${ghosts(4)}</div></div>
+    <form id="f" class="ask"><input id="email" type="email" autocomplete="email" placeholder="Your email" aria-label="Your email" value="${esc(prefill)}" required>
+      <button class="next" id="next">Send code</button>
+      <button class="linkish" id="solo" type="button">Use without an account</button></form>
   </section>`;
   $('#email').focus();
   $('#f').onsubmit = async (e) => {
@@ -302,27 +276,32 @@ function connectFirst(prefill = '') {
   $('#solo').onclick = () => { state.solo = true; go('scan'); };
 }
 function codeScreen(email, devCode) {
-  $('#app').innerHTML = `<section class="screen center">
-    <div class="ring full"><div>${logo(36)}</div></div>
+  $('#app').innerHTML = `<section class="screen tiles">
+    <div class="lbl">Sign in</div>
     <h1>Check your email</h1>
     <p class="hint" id="hint">Type the code we sent to <b>${esc(email)}</b>.</p>
-    <form id="f" class="signin"><input id="code" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000" value="${esc(devCode || '')}" required>
-      <div class="go"><button class="next" id="next">Sign in</button></div></form>
-    <button class="linkish" id="again" type="button">Send a new code</button> <button class="linkish" id="other" type="button">Use another email</button>
+    <form id="f" class="ask fill"><label class="cells">${'<i></i>'.repeat(6)}<input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" aria-label="6-digit code" value="${esc(devCode || '')}" required></label>
+      <button class="next" id="next">Sign in</button>
+      <div class="links"><button class="linkish" id="again" type="button">Send a new code</button><button class="linkish" id="other" type="button">Use another email</button></div></form>
   </section>`;
-  const input = $('#code'); input.focus();
+  const input = $('#code'), cells = [...document.querySelectorAll('.cells i')];
+  const paint = () => {
+    const d = input.value.replace(/\D/g, '').slice(0, 6);
+    cells.forEach((c, i) => { c.classList.toggle('on', i < d.length); c.classList.toggle('at', i === d.length); c.textContent = d[i] || ''; });
+  };
+  paint(); input.focus();
   const submit = async () => {
     const code = input.value.replace(/\D/g, ''); if (code.length !== 6) return;
     $('#next').disabled = true; $('#next').textContent = 'Signing in…';
     const { ok, d } = await post('/api/signin/verify', { email, code });
     if (!ok) { $('#hint').textContent = d.error || 'Something went wrong.'; $('#hint').style.color = 'var(--s2)'; $('#next').disabled = false; $('#next').textContent = 'Sign in'; input.select(); return; }
-    $('#app').innerHTML = `<section class="screen center"><div class="ring full"><div><span class="big-check" aria-hidden="true"></span></div></div>
+    $('#app').innerHTML = `<section class="screen tiles center"><div class="ring full"><div><span class="big-check" aria-hidden="true"></span></div></div>
       <h1>Signed in</h1><p class="hint">${esc(d.email)}${d.invite ? ` · next: ${esc(d.invite.team.name)}` : state.after === 'team' ? ' · next: your team' : ''}</p></section>`;
     setTimeout(() => { if (state.after === 'team' && !d.invite) { location.href = meUrl('/go?to=' + encodeURIComponent('/team/new')); return; } state.scan = null; go('scan'); }, 1100);
   };
-  input.oninput = () => { if (input.value.replace(/\D/g, '').length === 6) submit(); };
+  input.oninput = () => { paint(); if (input.value.replace(/\D/g, '').length === 6) submit(); };
   $('#f').onsubmit = (e) => { e.preventDefault(); submit(); };
-  $('#again').onclick = async () => { const { ok, d } = await post('/api/signin/code', { email }); $('#hint').textContent = ok ? 'New code sent.' : d.error || 'Something went wrong.'; if (ok && d.devCode) input.value = d.devCode; };
+  $('#again').onclick = async () => { const { ok, d } = await post('/api/signin/code', { email }); $('#hint').textContent = ok ? 'New code sent.' : d.error || 'Something went wrong.'; if (ok && d.devCode) { input.value = d.devCode; paint(); } };
   $('#other').onclick = () => connectFirst(email);
 }
 
@@ -340,7 +319,7 @@ function moveFirst() {
 function handOff(sharing = false) {
   const orange = document.body.classList.contains('celebrate');
   $('#app').innerHTML = `<section class="screen center${orange ? ' allset handoff' : ''}">
-    <div class="ring full"><div>${logo(36)}</div></div>
+    <div class="ring full"><div>${orange ? '<svg viewBox="0 0 52 52" width="42" height="42" aria-hidden="true"><path class="check done" d="M14 27l8 8 16-18"/></svg>' : logo(36)}</div></div>
     <h1>${sharing ? 'Opening Me' : 'Here’s you'}</h1>
     <p class="hint">${sharing ? 'Make your link there. Nothing is shared until you say so.' : 'Opening your dashboard. Puddle stays in the menu bar: click ✱ any time.'}</p>
     ${orange ? '<div class="wait-dots" aria-hidden="true"><i></i><i></i><i></i></div>' : ''}

@@ -6,6 +6,7 @@ import zlib from 'node:zlib';
 import { makeFollower } from './lines.js';
 import { parseRollout } from './codex-backfill.js';
 import { canonicalClient } from './agents.js';
+import { commandKind, fileExt } from './kinds.js';
 
 const PROJECTS = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
 const CODEX = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
@@ -29,6 +30,8 @@ function walk(dir, out = []) {
   }
   return out;
 }
+const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const labels = (name, input) => (name === 'Bash' ? { cmd_kind: commandKind(input?.command) } : EDITS.has(name) ? { ext: fileExt(input?.file_path || input?.notebook_path) } : {});
 const readLog = (file) => (file.endsWith('.zst') ? zlib.zstdDecompressSync(fs.readFileSync(file)) : fs.readFileSync(file)).toString('utf8');
 
 const textOf = (content) => {
@@ -65,7 +68,7 @@ export function makeTranscriptParser() {
         reqs.set(r.requestId, { ts: prev ? Math.min(prev.ts, ts) : ts, model: m.model, usage: m.usage, session_id: r.sessionId, prompt_id: r.promptId || prev?.prompt_id || current.get(r.sessionId) || null,
           effort: r.effort || prev?.effort || null });
         changed.reqs.add(r.requestId);
-        for (const b of Array.isArray(m.content) ? m.content : []) if (b?.type === 'tool_use') uses.set(b.id, { name: b.name, ts, session_id: r.sessionId });
+        for (const b of Array.isArray(m.content) ? m.content : []) if (b?.type === 'tool_use') uses.set(b.id, { name: b.name, ts, session_id: r.sessionId, ...labels(b.name, b.input) });
       } else if (r.type === 'user' && m) {
         if (r.promptId && !r.isMeta && !r.isCompactSummary) current.set(r.sessionId, r.promptId);
         if (Array.isArray(m.content) && m.content.some((b) => b?.type === 'tool_result')) {
@@ -118,6 +121,8 @@ export function makeBackfill(db, { home, notify, log }) {
       cache_read = excluded.cache_read, cache_creation = excluded.cache_creation, success = excluded.success,
       prompt_length = excluded.prompt_length, attrs_json = excluded.attrs_json, agent = 'codex'
     WHERE events.source = 'transcript'`);
+  const label = db.prepare("UPDATE events SET attrs_json = json_set(COALESCE(attrs_json, '{}'), '$.cmd_kind', ?, '$.ext', ?) WHERE dedupe = ?");
+  const dropSession = db.prepare("DELETE FROM events WHERE session_id = ? AND source = 'transcript'");
   const existing = db.prepare('SELECT source, input_tokens, output_tokens, cache_read, cache_creation, cost_usd, prompt_length FROM events WHERE dedupe = ?');
   const upUser = db.prepare(`INSERT INTO users (user_key, email, account_uuid, organization_id, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_key) DO UPDATE SET email = COALESCE(users.email, excluded.email), first_seen = MIN(users.first_seen, excluded.first_seen), last_seen = MAX(users.last_seen, excluded.last_seen)`);
@@ -140,7 +145,7 @@ export function makeBackfill(db, { home, notify, log }) {
     return Math.max(since, Number(getMeta('reset_at')) || 0);
   }
 
-  const VERSION = 3;
+  const VERSION = 4;
   function run({ full = false } = {}) {
     if (status.running) return status;
     if ((Number(getMeta('backfill_version')) || 1) < VERSION) { full = true; setMeta('backfill_version', VERSION); }
@@ -169,7 +174,7 @@ export function makeBackfill(db, { home, notify, log }) {
         const p = s.parser, later = nothing();
         const inWindow = (ts) => ts >= lo && ts <= hi;
 
-        db.exec('BEGIN');
+        db.exec('BEGIN IMMEDIATE');
         try {
           const touched = new Set();
           const ep = (sid) => p.meta.get(sid)?.entrypoint || null;
@@ -214,9 +219,9 @@ export function makeBackfill(db, { home, notify, log }) {
             for (const [name, key, decision] of [['tool_result', 'tr:', null], ['tool_decision', 'td:', res.decision?.decision || null]]) {
               if (name === 'tool_decision' && !decision) continue;
               const ex = existing.get(key + res.id);
-              if (ex && ex.source !== 'transcript') continue;
+              if (ex && ex.source !== 'transcript') { if (use.cmd_kind || use.ext) label.run(use.cmd_kind || null, use.ext || null, key + res.id); continue; }
               touch(res.session_id, res.ts);
-              const attrs = { tool_use_id: res.id, tool_parameters: params, source: res.decision?.source || null, recovered_from: 'session log', 'session.id': res.session_id, 'app.entrypoint': ep(res.session_id) };
+              const attrs = { tool_use_id: res.id, tool_parameters: params, cmd_kind: use.cmd_kind, ext: use.ext, source: res.decision?.source || null, recovered_from: 'session log', 'session.id': res.session_id, 'app.entrypoint': ep(res.session_id) };
               const r = ins.run(key + res.id, res.ts, name, userKey, res.session_id, res.prompt_id, use.name || null,
                 name === 'tool_result' ? (res.is_error ? 0 : 1) : null, null, null, null, null, null, null, null, decision, JSON.stringify(attrs));
               if (!ex && Number(r.changes)) recovered[name]++;
@@ -267,6 +272,7 @@ export function makeBackfill(db, { home, notify, log }) {
         files++; bytesRead += st.size;
         let x; try { x = parseRollout(readLog(file)); } catch { setFile.run(file, st.size, st.mtimeMs); continue; }
         if (!x.session?.id) { setFile.run(file, st.size, st.mtimeMs); continue; }
+        if (x.session.background) { dropSession.run(x.session.id); setFile.run(file, st.size, st.mtimeMs); continue; }
         const sid = x.session.id, entry = canonicalClient(x.session.entrypoint) || null;
         const attrs = (o) => JSON.stringify({ ...o, recovered_from: 'codex log', 'session.id': sid, 'app.entrypoint': entry });
         let complete = true;
@@ -281,13 +287,13 @@ export function makeBackfill(db, { home, notify, log }) {
             row.input ?? null, row.output ?? null, row.cacheRead ?? null, row.cacheCreation ?? null, row.cost ?? null, row.length ?? null, null, attrs(a));
           if (!ex && Number(r.changes)) recovered[name] = (recovered[name] || 0) + 1;
         };
-        db.exec('BEGIN');
+        db.exec('BEGIN IMMEDIATE');
         try {
           for (const q of x.prompts) put(q.key, q.ts, 'user_prompt', { length: q.length, prompt_id: q.id }, { prompt_length: q.length });
           for (const q of x.reqs) put(q.key, q.ts, 'api_request', { model: q.model, input: q.input, output: q.output, cacheRead: q.cached, cacheCreation: q.cacheWrite, prompt_id: q.prompt_id,
             cost: estimateCost(q.model, { input_tokens: Math.max(0, q.input - q.cacheWrite), cache_read_input_tokens: q.cached, cache_creation_input_tokens: q.cacheWrite, output_tokens: q.output }) },
             { effort: q.effort, thinking_tokens: q.thinking, context_window: q.window });
-          for (const q of x.steps) put(q.key, q.ts, 'tool_result', { tool: q.tool, success: q.ok ? 1 : 0 }, { duration_ms: q.ms });
+          for (const q of x.steps) put(q.key, q.ts, 'tool_result', { tool: q.tool, success: q.ok ? 1 : 0 }, { duration_ms: q.ms, cmd_kind: q.cmd_kind, ext: q.ext });
           for (const q of x.lines) put(q.key, q.ts, 'code_lines', {}, { added: q.added, removed: q.removed });
           for (const q of x.compactions) put(q.key, q.ts, 'compaction', {}, { trigger: 'auto' });
           if (complete) setFile.run(file, st.size, st.mtimeMs);
@@ -333,7 +339,7 @@ export function makeBackfill(db, { home, notify, log }) {
     setMeta('shutdown', 'running');
     setMeta('heartbeat', Date.now());
     clearInterval(beat);
-    beat = setInterval(() => setMeta('heartbeat', Date.now()), HEARTBEAT_MS); beat.unref();
+    beat = setInterval(() => { try { setMeta('heartbeat', Date.now()); } catch (e) { log(`heartbeat: ${e.code || e.message}`); } }, HEARTBEAT_MS); beat.unref();
   }
 
   return {

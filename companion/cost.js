@@ -5,6 +5,21 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 const HOUR = 3600_000, DAY = 24 * HOUR, STALL_MS = 2000, KEEP = 14 * 24;
 const r1 = (n) => Math.round(n * 10) / 10;
 
+export const stopsFile = (dir) => path.join(dir, 'logs', 'stops.ndjson');
+export function noteStop(dir, e, now = Date.now()) {
+  try {
+    const code = String(e?.code || e?.name || 'Error').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'Error';
+    fs.mkdirSync(path.dirname(stopsFile(dir)), { recursive: true });
+    fs.appendFileSync(stopsFile(dir), JSON.stringify({ t: now, code }) + '\n', { mode: 0o600 });
+  } catch {}
+}
+function stopsSince(dir, from) {
+  let rows = [];
+  try { rows = fs.readFileSync(stopsFile(dir), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.t >= from); } catch {}
+  const kinds = {}; for (const r of rows) kinds[r.code] = (kinds[r.code] || 0) + 1;
+  return { crashes: rows.length, crashKinds: rows.length ? kinds : undefined };
+}
+
 export function makeCost({ dir, reads = () => null, errors = null, now = () => Date.now(), every = 60_000, timers = true,
   loop = monitorEventLoopDelay({ resolution: 20 }), cpuUsage = (since) => process.cpuUsage(since) }) {
   const file = path.join(dir, 'logs', 'cost.ndjson');
@@ -51,7 +66,7 @@ export function makeCost({ dir, reads = () => null, errors = null, now = () => D
       const sum = (k) => rows.reduce((a, h) => a + h[k], 0), max = (k) => Math.max(0, ...rows.map((h) => h[k]));
       const secs = Math.max(1, (t - Math.max(started, rows[0]?.hour ?? t, t - DAY)) / 1000);
       return { hours: r1(secs / 3600), cpuPct: r1((sum('cpuS') / secs) * 100), rssMb: max('rssMb'), worstBlockMs: max('worstBlockMs'), blocks: sum('blocks'),
-        reads: sum('reads'), readMb: Math.round(sum('readMb')), worstReadMs: max('worstReadMs'), historyMb: Math.round(cur.historyMb || max('historyMb')), statusRuns: sum('statusRuns') };
+        reads: sum('reads'), readMb: Math.round(sum('readMb')), worstReadMs: max('worstReadMs'), historyMb: Math.round(cur.historyMb || max('historyMb')), statusRuns: sum('statusRuns'), ...stopsSince(dir, t - DAY) };
     },
     close() { clearInterval(timer); loop.disable(); },
   };
