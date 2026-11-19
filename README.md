@@ -12,6 +12,14 @@
 <p align="center"><em>Work has changed. See it differently.</em></p>
 
 <p align="center">
+  <a href="../../releases/latest"><img src="assets/readme/download-mac.png" width="234" alt="Download for Mac"></a>
+</p>
+
+<p align="center">
+  Free and open source · or get it at <a href="https://puddle.rip">puddle.rip</a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/macOS-Apple%20silicon-111111?style=flat-square" alt="macOS, Apple silicon">
   <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex-111111?style=flat-square" alt="Works with Claude Code and Codex">
