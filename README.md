@@ -29,28 +29,38 @@
 
 ## Your team, as it works
 
-Who is working right now, from where, on what, and who is about to hit a limit. Puddle flags what needs a look before
-it slows anyone down.
+Who is working right now, on what, and who is about to hit a limit. Puddle flags what needs a look before it slows
+anyone down.
 
 <p align="center">
-  <img src="assets/readme/team-map.png" width="860" alt="A team map with teammates by city, next to 'Needs a look': one teammate's agent had to slow down, another's plan is almost used up">
+  <img src="assets/readme/team.png" width="100%" alt="The team table: each person's state right now, what their agents work on, time today, task size and plan limits, next to 'Needs a look'">
 </p>
 
 <p align="center">
-  <img src="assets/readme/team-table.png" width="860" alt="The team table: each person's state right now, what their agents work on, time today, task size and plan limits">
+  <img src="assets/readme/team-map.png" width="100%" alt="Where the team is, on a map, next to the models, effort and apps they use">
+</p>
+
+Click a person to see how they work: their day, their plan limits filling up, what the agent worked on, task and
+conversation size, prompt by prompt, recent conversations, code changes and tokens per day. Point at any bar or square
+for its detail.
+
+<p align="center">
+  <img src="assets/readme/teammate.png" width="100%" alt="A teammate's page: today against a usual day, plan limits as two shapes filling up, and what needs a look">
+</p>
+
+<p align="center">
+  <img src="assets/readme/teammate-work.png" width="100%" alt="What the agent worked on, one square per percent of its steps, and task size, one dot per prompt">
 </p>
 
 Everyone keeps their prompts and code to themselves. The team sees the work, never the words.
 
 ## You, day by day
 
-Today against a usual day, how much of the time your agents worked rather than waited on you, what you built (web, iOS
-app or code, and in which languages), and the code it shipped.
+Today against a usual day, the days you worked, how far each prompt carries and how much ran without asking you, plus
+what you built and the code it shipped.
 
 <p align="center">
-  <img src="assets/readme/today.png" width="280" align="top" alt="Today: 4:14 h with agents, a little under a usual day by now, with an hour-by-hour chart">
-  <img src="assets/readme/tokens.png" width="280" align="top" alt="Tokens per day over three months, as a calendar">
-  <img src="assets/readme/code-changes.png" width="280" align="top" alt="Code changes per project over two weeks: lines added and removed">
+  <img src="assets/readme/me.png" width="100%" alt="Me: today hour by hour, days worked, steps per prompt and how much ran without asking">
 </p>
 
 Keep it to yourself, or share a live page of your records: agent hours, streak, lines shipped, your biggest prompt. It sits nicely next to a CV or a portfolio: yes,

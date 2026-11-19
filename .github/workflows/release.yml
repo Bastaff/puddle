@@ -39,7 +39,7 @@ jobs:
           IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           if [ "$SIGN" = true ]; then export APPLE_CERTIFICATE="$CERT" APPLE_CERTIFICATE_PASSWORD="$CERT_PASSWORD" APPLE_SIGNING_IDENTITY="$IDENTITY"; fi
-          npx --yes @tauri-apps/cli@2.12.1 build --bundles app
+          npx --yes @tauri-apps/cli@2.12.6 build --bundles app
       - name: Notarize it (a download opens with no warning)
         if: env.SIGN == 'true'
         env:
@@ -60,5 +60,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Puddle ${GITHUB_REF_NAME#v}" --notes-file CHANGELOG.md
+          awk -v v="## ${GITHUB_REF_NAME#v}" '$0 == v { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}"; exit 1; }
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Puddle ${GITHUB_REF_NAME#v}" --notes-file notes.md
           if [ "$SIGN" = true ]; then gh release upload "$GITHUB_REF_NAME" "$ZIP" "$ZIP.sha256" --clobber; fi

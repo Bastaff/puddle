@@ -639,7 +639,8 @@ export function makeQueries(db, { now: clock = () => Date.now(), rollup = () => 
       const contextOf = (k) => {
         const peaks = (ctxRows.get(k) || []).map((r) => Math.min(1, Number(r.used) / (Number(r.win) || contextWindow(r.model)))).filter((x) => x > 0).sort((a, b) => a - b);
         if (!peaks.length) return null;
-        return { typical: Math.round(peaks[Math.floor((peaks.length - 1) / 2)] * 100), max: Math.round(peaks[peaks.length - 1] * 100), full: peaks.filter((x) => x >= 0.9).length, sessions: peaks.length };
+        return { typical: Math.round(peaks[Math.floor((peaks.length - 1) / 2)] * 100), max: Math.round(peaks[peaks.length - 1] * 100), full: peaks.filter((x) => x >= 0.9).length, sessions: peaks.length,
+          fills: peaks.length <= 60 ? peaks.map((x) => Math.round(x * 100)) : Array.from({ length: 60 }, (_, i) => Math.round(peaks[Math.round((i / 59) * (peaks.length - 1))] * 100)) };
       };
       const sNames = source(f, { names: ['skill_activated', 'api_request', 'subagent_completed'], day: 'team.features' });
       const names$ = skips.has('features') ? Promise.resolve(new Map()) : group(`SELECT e.user_key, CASE name WHEN 'skill_activated' THEN 'skill' WHEN 'api_request' THEN 'mcp' ELSE 'agent' END kind, label, SUM(n) n

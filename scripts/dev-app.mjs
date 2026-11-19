@@ -20,7 +20,7 @@ step('The Node.js the app carries (scripts/fetch-node.mjs)');
 execFileSync('node', [path.join(ROOT, 'scripts', 'fetch-node.mjs')], { stdio: 'inherit' });
 
 step('Build Puddle Dev from this checkout');
-const b = spawnSync('npx', ['--yes', '@tauri-apps/cli@2.12.1', 'build', '--bundles', 'app', '--config', 'tauri.dev.json'], { cwd: APP_DIR, env, stdio: 'inherit' });
+const b = spawnSync('npx', ['--yes', '@tauri-apps/cli@2.12.6', 'build', '--bundles', 'app', '--config', 'tauri.dev.json'], { cwd: APP_DIR, env, stdio: 'inherit' });
 if (b.status !== 0) process.exit(b.status || 1);
 execFileSync('codesign', ['--verify', '--deep', '--strict', BUILT]);
 
