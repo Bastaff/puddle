@@ -151,13 +151,35 @@
 .home .silicon { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-sm); color: var(--ink); font-weight: 700; }
 .home #req.warn { color: var(--warn-text, var(--warn)); font-weight: 700; }
 #install .cta { justify-content: flex-start; margin-top: 12px; }
+.showcase { display: flex; flex-direction: column; gap: 18px; }
+.sc-band { position: relative; border-radius: 28px; padding: clamp(30px, 4.5vw, 44px) 22px 22px; margin-top: clamp(18px, 3vw, 28px); display: flex; flex-direction: column; gap: 14px; }
+.sc-me-band { background: linear-gradient(180deg, color-mix(in srgb, var(--s2) 12%, var(--page)), color-mix(in srgb, var(--s2) 4%, var(--page))); }
+.sc-team-band { background: linear-gradient(180deg, color-mix(in srgb, var(--s1) 12%, var(--page)), color-mix(in srgb, var(--s1) 4%, var(--page))); }
+.home .sc-head { position: absolute; left: clamp(14px, 2.4vw, 26px); top: 0; transform: translateY(-52%); margin: 0; font-size: clamp(34px, 6vw, 58px); line-height: 1; font-weight: 900; letter-spacing: -0.035em; text-transform: none; color: var(--ink); }
+.sc-me.lgrid { margin: 0; }
+.sc-me > .card { margin: 0; }
+.tp .sc-me h2 { margin: 0 auto 0 0; color: var(--ink); }
+.sc-me .cr-line { flex-shrink: 0; }
+.tp .sc-me p { line-height: 1.4; color: var(--ink-2); }
+.tp .sc-me .cr-big { line-height: .95; color: var(--ink); }
+.sc-team { position: relative; padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin: 0; container: card / inline-size; }
+.sc-team .ptable { overflow-x: auto; }
+.sc-team > .fx-token { position: absolute; z-index: 5; }
+.sc-map { height: 250px; border-radius: 12px; overflow: hidden; }
+.sc-map .pin circle { transform-box: fill-box; transform-origin: center; }
+.sc-map .pin circle.hit { fill: none; stroke-width: 2.5; pointer-events: none; }
+.sc-top { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+.sc-issues { margin: 0; height: 250px; overflow: hidden; box-shadow: none; border-radius: 12px; }
+.sc-issues .att-t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+@media (max-width: 900px) { .sc-top { grid-template-columns: minmax(0, 1fr); } .sc-issues { height: 178px; } .sc-issues .att:nth-child(n+3) { display: none; } }
+.sc-rows { display: grid; gap: 3px; }
+.sc-rows .brow.body, .sc-rows .now-ic { transition: background-color .8s ease, opacity .8s ease; }
+.sc-rows .wm i { transition: flex-grow 1s ease; }
+.sc-rows .vol i { transition: width 1s ease; }
+.home .brow.head { display: grid; }
+@container card (max-width: 640px) { .home .brow.head { display: none; } }
+@media (max-width: 720px) { .sc-band { padding: 30px 6px 6px; border-radius: 22px; } .sc-team { padding: 8px; } }
 .map .pin { transition: opacity .8s ease; } .map .pin.off { opacity: .4; } .map .pin.off .halo { visibility: hidden; }
-.home .shots { display: flex; flex-direction: column; gap: 1rem; }
-.home .shot-t { margin-top: .75rem; }
-.home .shot-t h2 { font-size: clamp(1.375rem, 3vw, 1.75rem); letter-spacing: -.01em; margin: 0 0 .375rem; text-wrap: balance; }
-.home .shot-t p { font-size: .9375rem; line-height: 1.5; color: var(--ink-2); margin: 0; max-width: 42rem; }
-.home .shot { display: block; width: 100%; height: auto; border-radius: 1.25rem; background: #fff; box-shadow: var(--shadow-sm); }
-.home .shot-n { margin: .25rem 0 0; }
 .home .card.plain h2, .home .faq h2 { font-size: 17px; margin: 0 0 6px; }
 .home .card.plain p, .home .card.plain li { font-size: 15px; line-height: 1.5; color: var(--ink-2); margin: 0; }
 .home .card.plain ul { margin: 6px 0 10px; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }

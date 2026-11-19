@@ -199,15 +199,8 @@ const catOf = (tool) => {
 };
 const dominant = (mix) => { let best = null; for (const k of CATS) if ((mix[k] || 0) > (mix[best] || 0)) best = k; return best; };
 
-const MARKS = {
-  'claude-code': { c: '#d97757', svg: '<path d="M8 .9 9.1 6 13 2.6 10.4 7.1l5.1.4-5 1.3 3.8 3.5-4.7-2.2.3 5.2L8 10.6l-1.9 4.7.3-5.2-4.7 2.2 3.8-3.5-5-1.3 5.1-.4L3 2.6 6.9 6z"/>' },
-  codex: { c: 'var(--ink)', svg: '<path d="M8 .8 14.3 4.4v7.2L8 15.2 1.7 11.6V4.4z" opacity=".22"/><path d="M8 2.6 12.7 5.3v5.4L8 13.4 3.3 10.7V5.3z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m5.8 6.4 1.9 1.6-1.9 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="8.4" y="9.1" width="2.4" height="1.4" rx=".7"/>' },
-};
 const AG = () => globalThis.PuddleAgents;
-const agentMark = (a) => {
-  const m = MARKS[a] || { c: 'var(--muted)', svg: `<circle cx="8" cy="8" r="7" opacity=".25"/><text x="8" y="11.3" text-anchor="middle" font-size="9.5" font-weight="800">${esc(AG()?.agent(a).letter || '?')}</text>` };
-  return `<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" style="color:${m.c}" aria-hidden="true">${m.svg}</svg>`;
-};
+const agentMark = (a) => AG().mark(a);
 const liveSessions = (p, within = 3 * 60_000) => (p.now?.sessions || []).filter((x) => Date.now() - x.ts < within);
 function agentsNow(p) {
   const by = new Map();

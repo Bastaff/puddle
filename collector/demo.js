@@ -230,6 +230,31 @@ export function makeSim(seed = 7) {
 
 const toRows = (ev) => ev.map(([ts, name, a]) => eventRow(name, ts, a));
 
+const REPOS = ['github.com/demo-team/checkout-web', 'github.com/demo-team/mobile-app', 'github.com/demo-team/billing-api', 'github.com/demo-team/design-system', 'github.com/demo-team/data-pipeline', 'github.com/demo-team/docs-site'];
+const TITLES = ['Fix flaky checkout test', 'Add dark mode to settings', 'Speed up invoice export', 'Tidy up the auth middleware', 'Move charts to the new colours', 'Write the release notes',
+  'Find the push notification crash', 'Retry failed webhooks', 'Shorter onboarding copy', 'Upgrade the build tools', 'Cache the pricing page', 'Add a CSV download', 'Make the search box faster', 'Clean up old feature flags'];
+const hashOf = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+
+function tagSessions(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS session_contexts (session_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, agent TEXT, repo TEXT, folder TEXT, source TEXT, ts INTEGER NOT NULL, title TEXT)`);
+  const fresh = db.prepare(`SELECT s.session_id, s.user_key, s.first_seen FROM sessions s LEFT JOIN session_contexts sc ON sc.session_id = s.session_id WHERE sc.session_id IS NULL`).all();
+  const ins = db.prepare(`INSERT OR IGNORE INTO session_contexts (session_id, account_id, agent, repo, folder, source, ts, title) VALUES (?, 'demo', 'claude-code', ?, ?, 'demo', ?, ?)`);
+  for (const r of fresh) {
+    const who = DEMO_PEOPLE.findIndex((p) => p.key === r.user_key), h = hashOf(r.session_id);
+    const repo = REPOS[(Math.max(0, who) + (h % 3)) % REPOS.length];
+    ins.run(r.session_id, repo, repo.split('/').pop(), Number(r.first_seen) || Date.now(), TITLES[h % TITLES.length]);
+  }
+}
+
+function addLines(db, pts) {
+  const ins = db.prepare(`INSERT OR IGNORE INTO events (dedupe, ts, name, user_key, session_id, attrs_json) VALUES (?, ?, 'code_lines', (SELECT user_key FROM sessions WHERE session_id = ?), ?, ?)`);
+  for (const x of pts) {
+    if (x.name !== 'lines_of_code.count' || !x.session?.session_id) continue;
+    const sid = x.session.session_id;
+    ins.run(`demo-cl-${sid}-${x.ts}-${x.type}`, x.ts, sid, sid, JSON.stringify({ [x.type === 'removed' ? 'removed' : 'added']: Math.round(x.value) }));
+  }
+}
+
 export function demoHistory({ seed = 7, now = Date.now() } = {}) {
   const { ev, pts } = makeSim(seed).history(now);
   return { rows: toRows(ev), points: pts };
@@ -253,6 +278,8 @@ export function makeDemo(file, { notify = () => {}, log = () => {}, seed = 7, no
     const { ev, pts } = sim.history(now() - 60_000);
     store.insertEvents(toRows(ev));
     store.insertPoints(pts);
+    tagSessions(store.db);
+    addLines(store.db, pts);
     const ins = store.db.prepare(`INSERT OR REPLACE INTO plan_limits (user_key, agent, org_hash, five_pct, five_reset, week_pct, week_reset, ts) VALUES (?, 'claude-code', 'demo', ?, ?, ?, ?, ?)`);
     const t = now();
     DEMO_PEOPLE.forEach((p, i) => { const [five, week] = p.plan; ins.run(p.key, five, t + (1 + (i % 4)) * 3600_000, week, t + (1 + (i % 6)) * 864e5, t - 5 * 60_000); });
@@ -269,7 +296,8 @@ export function makeDemo(file, { notify = () => {}, log = () => {}, seed = 7, no
     const { ev, pts } = sim.step(Date.now());
     if (!ev.length && !pts.length) return;
     store.insertEvents(toRows(ev));
-    if (pts.length) store.insertPoints(pts);
+    if (pts.length) { store.insertPoints(pts); addLines(store.db, pts); }
+    tagSessions(store.db);
     notify();
   }
   return {

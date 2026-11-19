@@ -1,0 +1,37 @@
+<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puddle scene</title>
+<link rel="preload" href="/vendor/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/board.css"><link rel="stylesheet" href="/cards.css"><link rel="stylesheet" href="/you.css"><link rel="stylesheet" href="/account.css">
+<style>
+  html, body { margin: 0; background: #e9e3d8; }
+  body { display: grid; place-items: center; min-height: 100vh; }
+  .scene { position: relative; width: 1280px; height: 560px; overflow: hidden; border-radius: 28px; background: var(--s2); font-family: var(--font); }
+  .scene > * { position: absolute; margin: 0; }
+  .scene .card { box-shadow: 0 18px 40px rgba(60, 25, 0, .22), 0 2px 6px rgba(60, 25, 0, .12); }
+  .sc-today { left: 32px; top: 32px; width: 384px; height: 236px; }
+  .sc-days { left: 32px; top: 288px; width: 182px; height: 236px; }
+  .sc-ship { left: 234px; top: 288px; width: 182px; height: 236px; }
+  .sc-agent { left: 448px; top: 32px; width: 384px; height: 236px; }
+  .sc-lev { left: 448px; top: 288px; width: 182px; height: 236px; }
+  .sc-hands { left: 650px; top: 288px; width: 182px; height: 236px; }
+  .sc-team { left: 864px; top: 32px; width: 720px; height: 236px; padding: 12px; overflow: hidden; }
+  .sc-team .ptable { gap: 3px; }
+  .sc-issues { left: 1004px; top: 404px; width: 360px; height: auto; min-height: 0; padding-bottom: 12px; z-index: 2; }
+  .sc-map { left: 864px; top: 288px; width: 384px; height: 236px; min-height: 0; border-radius: 22px; overflow: hidden; }
+  .scene.sc-shot { border-radius: 0; }
+</style></head>
+<body>
+<div class="scene" aria-label="Puddle at work: Me's cards, the team table, Needs a look and the team map, from the demo">
+  <div class="sc-me-slot" data-id="today" data-size="m"></div>
+  <div class="sc-me-slot" data-id="squares" data-size="s"></div>
+  <div class="sc-me-slot" data-id="shipped" data-size="s"></div>
+  <div class="sc-me-slot" data-id="agent" data-size="m"></div>
+  <div class="sc-me-slot" data-id="leverage" data-size="s"></div>
+  <div class="sc-me-slot" data-id="handsoff" data-size="s"></div>
+  <div class="card sc-team"><div class="ptable"><div class="brow head"><span>Person · right now</span><span>Works on</span><span>Time</span><span>Task size</span><span>Limits</span></div><div class="sc-rows"></div></div></div>
+  <section class="card issues sc-issues" aria-label="Needs a look"><header><h2>Needs a look</h2><span class="chip"></span></header><ul class="attention"></ul></section>
+  <div class="card map sc-map"></div>
+</div>
+<script src="/vendor/d3-array.min.js"></script><script src="/vendor/d3-geo.min.js"></script><script src="/vendor/topojson-client.min.js"></script>
+<script src="/when.js"></script><script src="/motion.js"></script><script type="module" src="/readme-scene.js"></script>
+</body></html>

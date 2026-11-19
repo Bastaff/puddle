@@ -1,79 +1,44 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="collector/public/brand/logo-dark.svg">
-    <img src="assets/readme/logo-tile.svg" width="300" alt="Puddle">
+    <source media="(prefers-color-scheme: dark) and (prefers-reduced-motion: reduce)" srcset="assets/readme/logo-dark.png">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/readme/logo-dark.gif">
+    <source media="(prefers-reduced-motion: reduce)" srcset="assets/readme/logo-light.png">
+    <img src="assets/readme/logo-light.gif" width="100%" alt="Puddle's logo among a few of its cards: today hour by hour, days worked, plan limits, hands-off, leverage and lines shipped">
   </picture>
 </p>
 
-<h1 align="center">Work has changed.<br>See it differently.</h1>
+<h1 align="center">Puddle</h1>
+
+<p align="center"><em>Work has changed. See it differently.</em></p>
 
 <p align="center">
-  You don't just write code anymore. You run agents that write it.
-  <b>Puddle</b> shows what that work really looks like: the hours, what your agents did, how often it went smoothly,
-  and how close you are to your limits. Live, in your menu bar.
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/macOS-Apple%20silicon-111111?style=flat-square" alt="macOS, Apple silicon">
+  <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex-111111?style=flat-square" alt="Works with Claude Code and Codex">
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><img src="assets/readme/download-mac.png" width="234" alt="Download for Mac"></a>
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="assets/readme/scene.png">
+    <img src="assets/readme/scene.gif" width="100%" alt="Puddle at work over a day: Today filling up hour by hour, you and the agent, days worked, lines shipped, steps per prompt and how much ran without asking; the team table, the team on a map and what needs a look">
+  </picture>
 </p>
 
-<p align="center">
-  Free and open source · never reads your prompts or code · or get it at <a href="https://puddle.rip">puddle.rip</a>
-</p>
+<p align="center"><sub>Puddle's demo: made-up people and projects.</sub></p>
 
-<p align="center">
-  <sub>Works with <b>Claude Code</b> and <b>Codex</b> · MIT · every field that can leave your Mac is in <a href="DATA.md">DATA.md</a> · your past work is in from the first open</sub>
-</p>
+---
 
-<br>
+You work with coding agents every day. Puddle shows how much, and what kind of work: hours with your agents, what
+they spent them on, how often it went smoothly, your rhythm, your plan limits. It lives in the menu bar and needs
+nothing from you after the first click.
 
-## Your team, as it works
-
-Who is working right now, on what, and who is about to hit a limit. Puddle flags what needs a look before it slows
-anyone down.
-
-<p align="center">
-  <img src="assets/readme/team.png" width="100%" alt="The team table: each person's state right now, what their agents work on, time today, task size and plan limits, next to 'Needs a look'">
-</p>
-
-<p align="center">
-  <img src="assets/readme/team-map.png" width="100%" alt="Where the team is, on a map, next to the models, effort and apps they use">
-</p>
-
-Click a person to see how they work: their day, their plan limits filling up, what the agent worked on, task and
-conversation size, prompt by prompt, recent conversations, code changes and tokens per day. Point at any bar or square
-for its detail.
-
-<p align="center">
-  <img src="assets/readme/teammate.png" width="100%" alt="A teammate's page: today against a usual day, plan limits as two shapes filling up, and what needs a look">
-</p>
-
-<p align="center">
-  <img src="assets/readme/teammate-work.png" width="100%" alt="What the agent worked on, one square per percent of its steps, and task size, one dot per prompt">
-</p>
-
-Everyone keeps their prompts and code to themselves. The team sees the work, never the words.
-
-## You, day by day
-
-Today against a usual day, the days you worked, how far each prompt carries and how much ran without asking you, plus
-what you built and the code it shipped.
-
-<p align="center">
-  <img src="assets/readme/me.png" width="100%" alt="Me: today hour by hour, days worked, steps per prompt and how much ran without asking">
-</p>
-
-Keep it to yourself, or share a live page of your records: agent hours, streak, lines shipped, your biggest prompt. It sits nicely next to a CV or a portfolio: yes,
-you really do have the experience.
-
-<sub>The pictures show Puddle's demo: made-up people and projects.</sub>
-
-## What it sees, and what it never does
+Keep it to yourself, share a live page to show off, or point a future employer at it: yes, you really do have the
+experience.
 
 **It never reads your conversations.** No prompts, no answers, no code, no commands, no file contents. Counts and
 timings, plus the names that tell your work apart (each project's folder and repo name, each conversation's title as
-Claude Code shows it), and they stay on your Mac unless you sign in to share them. Every byte that can leave is listed
-in [DATA.md](DATA.md), next to the code that sends it.
+Claude Code shows it), and they stay on your Mac unless you sign in to share them. Every byte that can leave is listed in
+[DATA.md](DATA.md), next to the code that sends it.
 
 ## Install
 
