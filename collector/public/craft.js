@@ -53,6 +53,7 @@ const ticks = (bs, X, w, y, W) => [0, Math.floor((bs.length - 1) / 2), bs.length
 const keys = (list) => `<div class="cr-keys">${list.map(([l, c, v]) => `<span><i style="background:${c}"></i>${esc(l)}${v != null ? ` <b>${esc(v)}</b>` : ''}</span>`).join('')}</div>`;
 const shell = (id, title, period, big, line, body = '', foot = '', size = 'l') => `<section class="card cr cr-${id} cr-${size}" data-sz="${size}" data-learn="cr:${id}"><header><h2>${title}</h2>${size === 's' ? '' : `<span class="cr-per">${esc(period)}</span>`}</header>
   <p class="cr-big">${big}</p>${line ? `<p class="cr-line">${line}</p>` : ''}${body}${size === 'l' ? foot : ''}</section>`;
+const none = (id, title, period, big, line, size) => shell(id, title, period, big, line, '<p class="cr-nodata">No data yet</p>', '', size).replace('<section class="card cr ', '<section data-none="1" class="card cr ');
 const plotBox = (h, cls = '') => `<div class="cr-plot${cls ? ` ${cls}` : ''}" style="--ph:${h}px"></div>`;
 const box = (card) => { const el = card?.querySelector('.cr-plot'); if (!el) return null; return { el, W: Math.max(120, el.clientWidth || 360), H: Math.max(40, el.clientHeight || 120) }; };
 const paint = (b, h, svg, label) => { b.el.innerHTML = `<svg viewBox="0 0 ${b.W} ${h}" width="${b.W}" height="${h}" role="img" aria-label="${esc(label)}">${svg}</svg>`; };
@@ -71,7 +72,7 @@ const kindTotals = (data) => { const t = {}; for (const d of data.work?.days || 
 
 const today = {
   html({ r, size }) {
-    if (!r?.today) return '';
+    if (!r?.today) return none('today', 'Today', 'Since midnight', '0 min', 'no work yet today', size);
     const d = r.today.minutes - (r.today.usual || 0);
     if (size === 's') return shell('today', 'Today', '', hrs(r.today.minutes), !r.today.usual ? 'worked today' : Math.abs(d) < 5 ? 'about a usual day' : `${d > 0 ? '▲' : '▼'} ${hm(Math.abs(d))} on usual`, plotBox(40, 'bleed'), '', size);
     const pill = !r.today.usual ? '' : Math.abs(d) < 5 ? '<span class="cr-pill">≈ usual</span>' : d > 0 ? `<span class="cr-pill up">▲ ${hm(d)}</span>` : `<span class="cr-pill">▼ ${hm(-d)}</span>`;
@@ -104,9 +105,9 @@ const today = {
 
 const agent = {
   html({ data, period, size }) {
-    const ds = data.work?.days || []; if (!ds.length) return '';
+    const ds = data.work?.days || [];
     const work = sum(ds.map((d) => d.working)), wait = sum(ds.map((d) => d.waiting)), peak = Math.max(0, ...ds.map((d) => d.peak || 0));
-    if (!work) return '';
+    if (!work) return none('agent', 'You and the agent', period, '0%', 'no agent work yet', size);
     const pct = `${Math.round((work / Math.max(1, work + wait)) * 100)}%`;
     if (size === 's') return shell('agent', 'You and the agent', period, pct, 'it worked, not waited', plotBox(40), '', size);
     return shell('agent', 'You and the agent', period, pct, 'of the time it worked, not waited on you', plotBox(size === 'l' ? 140 : 40, size === 'm' ? 'bleed' : ''),
@@ -140,7 +141,7 @@ const agent = {
 const built = {
   html({ data, period, size }) {
     const t = kindTotals(data), order = ['ios', 'web', 'code'].filter((k) => t[k]).sort((a, b) => t[b] - t[a]);
-    if (!order.length) return '';
+    if (!order.length) return none('built', 'What you built', period, '—', 'nothing built yet', size);
     const all = sum(order.map((k) => t[k])), pc = (k) => Math.round((t[k] / all) * 100), top = KIND[order[0]][0], line = `${pc(order[0])}% of your work`;
     const kbar = `<div class="cr-kbar">${order.map((k) => `<i class="cr-wide" style="flex:${t[k]};background:${KIND[k][1]}" title="${KIND[k][0]} ${pc(k)}%">${pc(k) >= 18 ? `<span>${pc(k)}%</span>` : ''}</i>`).join('')}</div>`;
     if (size === 's') return shell('built', 'What you built', period, top, line, kbar, '', size);
@@ -160,7 +161,7 @@ const built = {
 const shipped = {
   total(data) { let n = 0; for (const p of data.codeLines || []) for (const d of p.days) n += d.added || 0; return n; },
   html({ data, period, size }) {
-    const n = shipped.total(data); if (!n) return '';
+    const n = shipped.total(data); if (!n) return none('shipped', 'Shipped', period, '+0', 'lines added', size);
     const c = {}; for (const d of data.work?.days || []) for (const [k, v] of Object.entries(d.cmd || {})) c[k] = (c[k] || 0) + v;
     const nums = [[c.commit, 'commits'], [c.push, 'pushes'], [c.deploy, 'deploys']].filter(([v]) => v);
     return shell('shipped', 'Shipped', period, `+${size === 's' ? compact(n) : nf(n)}`, size === 's' ? 'lines added' : 'lines of code added', plotBox(size === 'l' ? 130 : 40, size === 'l' ? '' : 'bleed'),
@@ -196,7 +197,7 @@ const shipped = {
 const squares = {
   html({ data, r, period, win, size }) {
     const by = workDays(data), daily = new Map((data.daily || []).map((x) => [x.day, x]));
-    if (!by.size && !daily.size) return '';
+    if (!by.size && !daily.size) return none('squares', 'Days', period, '0', 'days worked', size);
     const active = dayList(win).filter((t) => { const k = key(new Date(t)); return by.has(k) || (daily.get(k)?.prompts || daily.get(k)?.tools); }).length;
     const run = r?.streak?.current > 1 ? r.streak.current : 0;
     const line = size === 's' ? `${active === 1 ? 'day' : 'days'} worked${run ? ` · ${run} in a row` : ''}` : `days worked${run ? ` · ${run} in a row` : ''}`;
@@ -249,7 +250,7 @@ const squares = {
 
 const leverage = {
   html({ p, data, period, size }) {
-    if (p.toolsPerPrompt == null || (Array.isArray(data.daily) && !data.daily.length)) return '';
+    if (p.toolsPerPrompt == null || (Array.isArray(data.daily) && !data.daily.length)) return none('leverage', 'Leverage', period, '0', 'steps per prompt', size);
     return shell('leverage', 'Leverage', period, p.toolsPerPrompt.toFixed(1), size === 's' ? 'steps per prompt' : 'agent steps for each prompt you wrote', plotBox(size === 'l' ? 120 : 40, size === 'l' ? '' : 'bleed'), '', size);
   },
   draw(card, ctx, opt) {
@@ -270,7 +271,7 @@ const leverage = {
 
 const week = {
   html({ p, r, size }) {
-    if (!r?.heat) return '';
+    if (!r?.heat) return none('week', 'Your week', 'Usual week', '—', 'no usual week yet', size);
     const style = (p.profile?.facts || []).find((f) => f.key === 'style')?.text;
     const word = style ? style.split(' ')[0] : null;
     const peak = (r.peakHours || []).slice(0, 2).map(hh);
@@ -321,7 +322,7 @@ const week = {
 
 const handsoff = {
   html({ p, period, size }) {
-    if (p.autoApproved == null) return '';
+    if (p.autoApproved == null) return none('handsoff', 'Hands-off', period, '0%', 'no actions yet', size);
     const r = p.runs || {}, shortN = Math.max(0, (r.prompts || 0) - (r.long || 0) - (r.chat || 0)), tot = Math.max(1, r.prompts || 0);
     const big = `${(Math.floor(p.autoApproved * 1000) / 10).toFixed(1)}%`;
     if (size === 's') return shell('handsoff', 'Hands-off', period, big, 'ran without asking', plotBox(40), '', size);

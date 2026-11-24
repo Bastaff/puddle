@@ -90,6 +90,16 @@
   const COLS = 4, MAXH = 2;
   const kind = (w, h) => (w <= 1 ? 's' : h >= 2 ? 'l' : 'm');
   const okPos = (p) => Array.isArray(p) && p.length === 4 && p.every(Number.isInteger) && p[0] >= 0 && p[2] >= 1 && p[0] + p[2] <= COLS && p[1] >= 0 && p[1] < 60 && p[3] >= 1 && p[3] <= MAXH;
+  function rise(at) {
+    const taken = new Set(), out = {};
+    for (const [id, p] of Object.entries(at).sort(([, a], [, b]) => a.r - b.r || a.c - b.c)) {
+      let r = p.r;
+      while (r > 0 && !cells([p.c, r - 1, p.w, p.h]).some((k) => taken.has(k))) r--;
+      out[id] = { ...p, r };
+      for (const k of cells([p.c, r, p.w, p.h])) taken.add(k);
+    }
+    return out;
+  }
   const cells = ([c, r, w, h]) => { const out = []; for (let y = r; y < r + h; y++) for (let x = c; x < c + w; x++) out.push(`${y},${x}`); return out; };
   const taken = (pos, ids) => new Set(ids.flatMap((id) => cells(pos[id])));
   function spot(occ, w, h, from = 0) {
@@ -220,7 +230,7 @@
       heads.forEach((c, i) => { c.style.gridColumn = '1 / -1'; c.style.gridRow = String(i + 1); });
       grid.style.gridTemplateRows = heads.length ? `repeat(${heads.length}, auto)` : '';
       const ids = shown.map((c) => c.dataset.card), P = state.pos;
-      const at = isWide() ? Object.fromEntries(ids.map((id) => [id, { c: P[id][0], r: P[id][1], w: P[id][2], h: P[id][3] }]))
+      const at = isWide() ? (arranging ? (x) => x : rise)(Object.fromEntries(ids.map((id) => [id, { c: P[id][0], r: P[id][1], w: P[id][2], h: P[id][3] }])))
         : flow([...ids].sort((a, b) => P[a][1] - P[b][1] || P[a][0] - P[b][0]).map((id) => ({ id, w: P[id][2], h: P[id][3] })), cols);
       for (const c of els()) {
         const p = at[c.dataset.card];

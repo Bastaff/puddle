@@ -930,10 +930,12 @@ const Fx = (() => {
 
 const soundBtn = $('#sound-btn');
 soundBtn.setAttribute('aria-pressed', String(Sound.on));
+const soundHint = () => { soundBtn.classList.toggle('blocked', Sound.on && Sound.blocked); soundBtn.title = !Sound.on ? 'Sounds off' : Sound.blocked ? 'Sounds are on: click anywhere on the page to hear them again' : 'Sounds on'; };
+addEventListener('puddle:sound', soundHint); soundHint();
 soundBtn.onclick = () => {
   Sound.on = !Sound.on;
   soundBtn.setAttribute('aria-pressed', String(Sound.on));
-  soundBtn.title = Sound.on ? 'Sounds on' : 'Sounds off';
+  soundHint();
   if (Sound.on) { Sound.play('toggle'); soundBtn.classList.remove('ping'); void soundBtn.offsetWidth; soundBtn.classList.add('ping'); }
 };
 for (const b of document.querySelectorAll('#range button')) b.onclick = () => {
@@ -1078,6 +1080,6 @@ applyDemo();
 layout.ready.then(() => cards.watch());
 connect();
 addEventListener('puddle:online', () => load());
-setInterval(() => { if (!document.hidden && !live) load(); }, 60_000);
+setInterval(() => { if (live) return; if (!document.hidden) load(); else if (Sound.on) listen(); }, 60_000);
 let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(render, 120); });
 load();

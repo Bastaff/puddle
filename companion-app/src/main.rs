@@ -241,7 +241,7 @@ fn on_action(app: &AppHandle) -> impl Fn(&tauri::Url) -> bool + Send + 'static {
             "splash_done" => paint_bg(&app),
             "quit" => app.exit(0),
             "uninstall" => { set_open_at_login(&app, false); app.exit(0) }
-            "close_main" => if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); dock(&app, Some("main")); },
+            "close_main" => if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); },
             "hide_popover" => if let Some(w) = app.get_webview_window("popover") { let _ = w.hide(); },
             t if t.starts_with("popover_h_") => if let (Some(w), Ok(h)) = (app.get_webview_window("popover"), t[10..].parse::<f64>()) {
                 let _ = w.set_size(tauri::LogicalSize::new(POPOVER.0, h.clamp(240.0, 900.0)));
@@ -269,18 +269,9 @@ fn main_window(app: &AppHandle) -> WebviewWindow {
         if let WindowEvent::CloseRequested { api, .. } = e {
             api.prevent_close();
             let _ = hide.hide();
-            dock(hide.app_handle(), Some("main"));
         }
     });
     w
-}
-
-fn dock(app: &AppHandle, closing: Option<&str>) {
-    #[cfg(target_os = "macos")]
-    {
-        let open = ["view", "main"].iter().any(|l| Some(*l) != closing && app.get_webview_window(l).and_then(|w| w.is_visible().ok()).unwrap_or(false));
-        let _ = app.set_activation_policy(if open { tauri::ActivationPolicy::Regular } else { tauri::ActivationPolicy::Accessory });
-    }
 }
 
 fn show_main(app: &AppHandle, path: &str) {
@@ -289,7 +280,6 @@ fn show_main(app: &AppHandle, path: &str) {
         let _ = w.navigate(format!("http://{API}{path}").parse().expect("valid url"));
     }
     let _ = w.show();
-    dock(app, None);
     let _ = w.set_focus();
 }
 
@@ -338,7 +328,6 @@ fn toggle_popover(app: &AppHandle, rect: Rect) {
 fn onboarding_done(app: AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();
-        dock(&app, Some("main"));
     }
     set_open_at_login(&app, true);
     open_me(&app);
@@ -383,6 +372,7 @@ fn open_view(app: &AppHandle, url: &str) {
             .theme(theme_now())
             .inner_size(1240.0, 860.0)
             .min_inner_size(420.0, 500.0)
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
             .visible(false)
             .build()
         {
@@ -391,7 +381,7 @@ fn open_view(app: &AppHandle, url: &str) {
                 let me = w.clone();
                 w.on_window_event(move |e| match e {
                     WindowEvent::Moved(_) | WindowEvent::Resized(_) => save_place(&me, true),
-                    WindowEvent::CloseRequested { .. } => { save_place(&me, false); dock(me.app_handle(), Some("view")); }
+                    WindowEvent::CloseRequested { .. } => save_place(&me, false),
                     WindowEvent::ThemeChanged(_) => { let _ = me.set_background_color(Some(page_color(is_dark()))); }
                     _ => {}
                 });
@@ -401,7 +391,6 @@ fn open_view(app: &AppHandle, url: &str) {
         },
     };
     let _ = w.show();
-    dock(app, None);
     let _ = w.set_focus();
     save_place(&w, true);
 }
@@ -516,7 +505,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.set_activation_policy(tauri::ActivationPolicy::Regular);
             watch_theme(app.handle());
             watch_menu_bar(app.handle());
 

@@ -1,6 +1,6 @@
 (() => {
   const IDLE = 20_000;
-  const decide = ({ mine, running, hidden, idleMs, tries }) => Boolean(mine && running && running !== mine && tries < 2 && (hidden || idleMs >= IDLE));
+  const decide = ({ mine, running, hidden, idleMs, tries, sound = false, back = false }) => Boolean(mine && running && running !== mine && tries < 2 && (sound ? back : hidden || idleMs >= IDLE));
   globalThis.puddleHealDecision = decide;
   if (typeof document === 'undefined') return;
 
@@ -9,13 +9,13 @@
   for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart', 'input']) addEventListener(ev, () => { lastTouch = Date.now(); }, { passive: true, capture: true });
   const triesKey = () => `puddle-heal:${running}`;
   const tries = () => { try { return Number(sessionStorage.getItem(triesKey())) || 0; } catch { return 9; } };
-  const check = () => {
-    if (!decide({ mine, running, hidden: document.hidden, idleMs: Date.now() - lastTouch, tries: tries() })) return false;
+  const check = (back = false) => {
+    if (!decide({ mine, running, hidden: document.hidden, idleMs: Date.now() - lastTouch, tries: tries(), sound: Boolean(globalThis.PuddleSound?.on), back })) return false;
     try { sessionStorage.setItem(triesKey(), String(tries() + 1)); sessionStorage.setItem('puddle-heal-scroll', String(scrollY)); } catch {}
     location.reload();
     return true;
   };
-  document.addEventListener('visibilitychange', () => { if (running) check(); });
+  document.addEventListener('visibilitychange', () => { if (running) check(!document.hidden); });
   globalThis.PuddleHeal = {
     saw(v) {
       if (!v || v === mine) return;

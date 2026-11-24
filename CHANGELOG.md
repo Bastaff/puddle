@@ -1,11 +1,11 @@
 # Changelog
 
-## 0.0.8
+## 0.0.9
 
-- **The website's front page shows Puddle at work again:** a made-up day in 10 seconds, with **You** first, drawn
-  with Me's own cards (Today, Days, Shipped, Leverage, Hands-off, You and the agent, What you built, Your week), and
-  then **Your team** with its map, Needs a look and each person's row. Every chart moves smoothly through the day.
-- **A teammate's page is tidier:** charts fill their tiles at every width, and the demo team works on made-up
-  projects with conversation titles, so every card can be tried.
-- **The README shows the app moving:** an animated banner with the logo and a few of Me's cards, and the demo above,
-  with still pictures for anyone who prefers reduced motion.
+- **Puddle is always in the Dock and in Cmd+Tab,** so you can switch to it like any other app. Clicking its Dock icon
+  opens Me.
+- **Sound keeps playing in the background:** leave Puddle open with sound on and you keep hearing your team work,
+  for as long as you like. If the Mac blocks sound, the sound button blinks and one click brings it back.
+- **Me never shows empty holes:** a card with nothing to show yet says so, and cards move up to fill free space.
+- **The menu bar's Today chart is drawn properly again,** with the hours under the bars.
+- **Team settings work in the app again:** deleting a team, copying or renewing the invite link and removing someone.

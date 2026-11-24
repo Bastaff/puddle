@@ -118,6 +118,7 @@ html[data-motion="full"] .cr-grow .sh-ring { stroke-dasharray: 0 151; animation:
 .cr-line { margin: 6px 0 14px; font-size: 14px; font-weight: 700; color: var(--ink-2); }
 .cr-pill { font-size: 15px; font-weight: 900; letter-spacing: 0; padding: 5px 12px; border-radius: 999px; background: var(--wash); color: var(--ink-2); }
 .cr-pill.up { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good-text); }
+.cr-nodata { flex: 1 1 auto; display: grid; place-items: center; margin: 0; min-height: 40px; font-size: 13px; font-weight: 700; color: var(--muted); background: var(--cal0); border-radius: 12px; opacity: .8; }
 .cr-plot { position: relative; flex: 1 1 auto; min-height: var(--ph, 120px); margin: auto -16px 0; }
 .cr-plot svg { position: absolute; left: 0; bottom: 0; display: block; overflow: visible; }
 .cr-sq, .cr-heat { flex: 1 1 auto; display: flex; align-items: flex-end; margin: auto -16px 0; min-width: 0; }

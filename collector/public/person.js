@@ -31,7 +31,7 @@ export function liveState(p) {
 function flagsCard(p, size) {
   const full = p.context?.full ? [{ kind: 'context', level: 'info', text: `${p.context.full} conversation${p.context.full === 1 ? '' : 's'} got nearly full (90%+)` }] : [];
   const f = [...(p.flags || []), ...full];
-  if (!f.length) return '';
+  if (!f.length && size !== 'l') return `<section class="card cr cr-${size} cr-flags" data-sz="${size}" data-learn="pv:flags"><header><h2>Needs a look</h2></header><p class="cr-big">0</p><p class="cr-line">nothing to check</p><p class="cr-nodata">✓ All good</p></section>`;
   if (size === 's') return `<section class="card cr cr-s cr-flags issues" data-sz="s" data-learn="pv:flags"><header><h2>Needs a look</h2></header><p class="cr-big">${f.length}</p>
     <p class="cr-line">${f.length === 1 ? 'thing to check' : 'things to check'}</p><div class="cr-fl">${f.map((x) => `<span class="cr-fi ${x.level}" title="${esc(x.text)}">${FLAG_IC[x.kind] || '!'}</span>`).join('')}</div>
     <p class="cr-flt">${esc(f[0].text)}</p></section>`;
@@ -121,7 +121,7 @@ export function mountPerson(el, { api, cards = null, stream = null, you = false,
     const fresh = patch([{ key: 'head', html: head, sig: head }, ...cardsHTML(p, r)]);
     layout.apply();
     const opt = { hover, rows }, ctx = ctxOf(p, r);
-    for (const [id, c] of Object.entries(CARDS)) if (c.draw && fresh.has(id)) c.draw(parts.get(id).node, ctx, opt);
+    for (const [id, c] of Object.entries(CARDS)) if (c.draw && fresh.has(id) && !parts.get(id).node.dataset.none) c.draw(parts.get(id).node, ctx, opt);
     document.body.classList.toggle('learn', learn.on);
     paintBar();
     if (fresh.has('head')) for (const g of parts.get('head').node.querySelectorAll('.sig')) hover(g, () => globalThis.signalTip(g.dataset.sig, p));

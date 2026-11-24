@@ -12,8 +12,8 @@ html.pp-page, .pp-body { background: transparent !important; margin: 0; overflow
 .pp .you-today .day-head { flex-wrap: wrap; gap: 4px 8px; }
 .pp .you-today .day-head b { font-size: 34px; }
 .pp .you-today .pill-cmp { white-space: nowrap; }
-.pp .pp-six { position: relative; padding: 14px 0 0; }
-.pp .pp-six svg { width: 100%; height: auto; display: block; overflow: visible; }
+.pp .pp-six { position: relative; padding: 14px 0 0; flex: none; min-height: 0; max-height: none; }
+.pp .pp-six svg { position: static; inset: auto; width: 100%; height: auto; display: block; overflow: visible; }
 .pp-now { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; font-weight: 800; color: var(--ink); line-height: 1; }
 .pp-ticks { position: relative; height: 16px; margin-top: 4px; }
 .pp-ticks span { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; color: var(--muted); white-space: nowrap; }

@@ -17,15 +17,15 @@ globalThis.PuddleSound = (() => {
       out = ctx.createGain(); out.gain.value = 0.8;
       out.connect(lp).connect(comp).connect(ctx.destination);
     }
-    if (ctx.state === 'suspended') ctx.resume();
     return ctx;
   }
-  let gestured = false;
-  function ready() {
-    const tap = navigator.userActivation ? navigator.userActivation.isActive : gestured;
-    if (!ctx && !tap) return null;
-    if (!ensure()) return null;
-    return ctx.state === 'running' || tap ? ctx : null;
+  let blocked = false;
+  const mark = (b) => { if (b !== blocked) { blocked = b; dispatchEvent(new CustomEvent('puddle:sound')); } };
+  function wake() {
+    if (!ensure()) return Promise.resolve(false);
+    if (ctx.state === 'running') { mark(false); return Promise.resolve(true); }
+    return Promise.race([ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 400))])
+      .then(() => { const ok = ctx.state === 'running'; mark(!ok && on); return ok; });
   }
   function note(freq, at, len, { gain = 0.03, type = 'sine', to = null } = {}) {
     freq *= cur.r; if (to) to *= cur.r;
@@ -55,18 +55,23 @@ globalThis.PuddleSound = (() => {
     if ((!on && !always) || !voices[name] || (document.visibilityState === 'hidden' && name === 'request')) return;
     const now = performance.now(), key = name + '|' + who;
     if (now - (last[key] || 0) < 600 || now - lastAny < 140) return;
-    if (!ready()) return;
+    if (!ctx || ctx.state !== 'running') { last[key] = lastAny = now; wake().then((ok) => { if (ok) voice(name, who); }); return; }
     last[key] = lastAny = now;
+    voice(name, who);
+  }
+  function voice(name, who) {
     const v = who == null || who < 0 ? null : PERSON[who % PERSON.length];
     cur = v ? { r: Math.pow(2, v[0] / 12), type: v[1] } : { r: 1, type: null };
     try { voices[name](); } catch {}
     cur = { r: 1, type: null };
   }
-  const unlock = () => { gestured = true; if (on) ensure(); };
-  for (const ev of ['pointerdown', 'keydown', 'touchstart']) addEventListener(ev, unlock, { once: true, capture: true, passive: true });
+  const unlock = () => { if (on && (!ctx || ctx.state !== 'running')) wake(); };
+  for (const ev of ['pointerdown', 'keydown', 'touchstart']) addEventListener(ev, unlock, { capture: true, passive: true });
+  if (on) setTimeout(wake, 0);
   return {
     play,
-    unlock: () => ensure(),
+    unlock: () => wake(),
+    get blocked() { return blocked; },
     get on() { return on; },
     set on(v) { on = v; try { localStorage.setItem('cu-sound', v ? '1' : '0'); } catch {} },
   };
